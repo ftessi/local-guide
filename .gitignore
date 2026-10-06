@@ -1,0 +1,27 @@
+# ── Secrets — NEVER commit ─────────────────────────────
+.env
+*.pem
+push_subscriptions.json
+
+# ── Model weights (~6GB, re-downloadable from HuggingFace) ──
+models/
+
+# ── Personal data ──────────────────────────────────────
+calendar.db
+*.db
+knowledge/private/
+
+# ── Python / tooling ───────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ── Local Claude Code settings ─────────────────────────
+.claude/settings.local.json
+
+# ── OS / editor ────────────────────────────────────────
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/

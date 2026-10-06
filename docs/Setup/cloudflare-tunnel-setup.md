@@ -92,7 +92,7 @@ This creates a CNAME record in Cloudflare DNS pointing your domain to the tunnel
 ```bash
 cd W:\LocalAgent
 .venv\Scripts\activate
-uvicorn server:app --host 127.0.0.1 --port 8000
+python server.py
 ```
 
 Wait for "Server ready." (model loads ~10s).
@@ -126,18 +126,12 @@ sc stop cloudflared
 
 **Auto-start the agent server via Task Scheduler:**
 
-1. Create `W:\LocalAgent\start_server.bat`:
-```batch
-@echo off
-cd W:\LocalAgent
-call .venv\Scripts\activate
-uvicorn server:app --host 127.0.0.1 --port 8000
-```
+1. The launcher already exists: `W:\LocalAgent\scripts\start_server.bat` (activates the venv and runs `python server.py`).
 
 2. Open **Task Scheduler** → Create Basic Task
    - Name: `LocalAgent Server`
    - Trigger: **When the computer starts**
-   - Action: Start a program → `W:\LocalAgent\start_server.bat`
+   - Action: Start a program → `W:\LocalAgent\scripts\start_server.bat`
    - Check "Run whether user is logged on or not"
 
 ---

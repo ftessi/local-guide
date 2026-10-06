@@ -120,7 +120,7 @@ Expected output during generation:
 
 To check device placement programmatically:
 ```bash
-python diagnose_gpu.py
+python scripts/diagnose_gpu.py
 ```
 
 Expected:
