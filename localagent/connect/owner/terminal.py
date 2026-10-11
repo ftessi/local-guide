@@ -2,13 +2,14 @@
 from localagent.protocol.guard import AuthError
 
 
-def run_terminal(protocol, agent, secret: str) -> int:
+def run_terminal(protocol, agent, secret: str, ask=None) -> int:
     try:
         session = protocol.open_owner_session(secret)
     except AuthError as e:
         print(f"Error: {e}")
         return 2
-    print("Agent ready. Type 'exit' or Ctrl+C to quit. Type 'reset' to clear the conversation.\n")
+    print("Agent ready. Type 'exit' or Ctrl+C to quit. Type 'reset' to clear the conversation."
+          + (" Type '/ask <name> <question>' to ask a connected agent." if ask else "") + "\n")
     try:
         while True:
             try:
@@ -24,6 +25,10 @@ def run_terminal(protocol, agent, secret: str) -> int:
             if _is_command(text, "reset"):
                 session.reset_history()
                 print("Conversation cleared (it stays saved in memory/).\n")
+                continue
+            if ask and text.lower().startswith("/ask"):
+                parts = text.split(maxsplit=2)
+                print(ask(parts[1], parts[2]) if len(parts) == 3 else "Usage: /ask <name> <question>", "\n")
                 continue
             print("Agent: ", end="", flush=True)
             try:
