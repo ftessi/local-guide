@@ -71,7 +71,7 @@ def test_env_file_and_environment(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("text, fragment", [
     ("model:\n  quantization: 8bit\n", "quantization"),
-    ("compartments: [shared]\n", "private"),
+    ("compartments: [shared, demo]\n", "private"),
     ("compartments: [private, Bad_Name]\n", "Bad_Name"),
     ("compartments: [private, private]\n", "duplicate"),
     ("modle:\n  id: x\n", "modle"),
@@ -97,3 +97,11 @@ def test_resolve_from_env(tmp_path, monkeypatch):
     d = write_agent_yaml(tmp_path / "a")
     monkeypatch.setenv("LOCALAGENT_DIR", str(d))
     assert resolve_agent_dir(None) == d.resolve()
+
+
+def test_private_may_be_left_out_only_by_a_one_compartment_agent(tmp_path):
+    cfg = load_config(write_agent_yaml(tmp_path / "t", "name: t\ncompartments: [demo]\n", installables=None))
+    assert cfg.compartments == ["demo"] and cfg.tessera_facing
+    assert not load_config(write_agent_yaml(tmp_path / "a")).tessera_facing
+    with pytest.raises(ConfigError, match="private"):
+        load_config(write_agent_yaml(tmp_path / "x", "name: x\ncompartments: [demo, acme]\n", installables=None))

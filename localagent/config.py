@@ -13,6 +13,7 @@ QUANTIZATIONS = ("4bit", "fp16", "none")
 COMPARTMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 TOP_LEVEL_KEYS = {"name", "model", "compartments", "memory"}
 EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+BUILTIN_CONNECTIONS = ("tessera",)  # connections whose code is part of LocalAgent: `builtin: true`, no source
 
 
 class ConfigError(Exception):
@@ -50,6 +51,11 @@ class AgentConfig:
     def get_env(self, key: str, default: str = "") -> str:
         """Process environment first, then the agent's .env file."""
         return os.environ.get(key) or self.env.get(key) or default
+
+    @property
+    def tessera_facing(self) -> bool:
+        """Serves one Tessera connection: exactly one compartment, not private. Nobody chats with it."""
+        return len(self.compartments) == 1 and self.compartments[0] != "private"
 
 
 def ensure_hf_home() -> None:
@@ -95,7 +101,12 @@ def _extensions(raw, kind: str, agent_dir: Path) -> dict[str, dict]:
     for name, value in raw.items():
         if not isinstance(name, str) or not EXTENSION_NAME_RE.match(name):
             raise ConfigError(f"Invalid {kind[:-1]} name '{name}' in installables.yaml")
-        if not isinstance(value, dict) or not (value.get("source") or (kind == "tools" and value.get("mcp"))):
+        builtin = kind == "connections" and isinstance(value, dict) and value.get("builtin") is True
+        if builtin and name not in BUILTIN_CONNECTIONS:
+            raise ConfigError(f"connections.{name}: there is no built-in connection called '{name}' "
+                              f"(built-in: {', '.join(BUILTIN_CONNECTIONS)})")
+        if not isinstance(value, dict) or not (builtin or value.get("source")
+                                               or (kind == "tools" and value.get("mcp"))):
             raise ConfigError(f"{kind}.{name} in installables.yaml needs {where}")
         value = _expand(value, agent_dir)
         if isinstance(value.get("mcp"), str):
@@ -164,8 +175,9 @@ def load_config(agent_dir: Path) -> AgentConfig:
             raise ConfigError(f"Invalid compartment name '{c}': use lowercase letters, digits and '-'")
     if len(set(compartments)) != len(compartments):
         raise ConfigError("'compartments' contains a duplicate name")
-    if "private" not in compartments:
-        raise ConfigError("'compartments' must include 'private' (owner conversations are stored there)")
+    if "private" not in compartments and len(compartments) != 1:
+        raise ConfigError("'compartments' must include 'private' (owner conversations are stored there). Only a "
+                          "Tessera-facing agent, which serves one connection, lists a single other compartment.")
 
     memory = _section(raw, "memory")
     env = {k: v for k, v in dotenv_values(agent_dir / ".env").items() if v is not None}

@@ -146,11 +146,15 @@ def load_connections(connections_config: dict, agent_dir: Path) -> dict[str, Con
     """Imports and checks the listed connections. setup() is called later, once the agent exists."""
     connections = {}
     for name, settings in (connections_config or {}).items():
-        folder = source_dir(agent_dir, "connections", name, settings["source"])
-        conn_cls = getattr(_import(folder, "connections", name), "CONNECTION", None)
-        if not (isinstance(conn_cls, type) and issubclass(conn_cls, Connection)):
-            raise ExtensionError(f"{folder / '__init__.py'} must export CONNECTION, a Connection subclass")
-        connection = conn_cls()
+        if settings.get("builtin"):
+            from localagent.connect.peer.tessera import TesseraConnection
+            connection = TesseraConnection()
+        else:
+            folder = source_dir(agent_dir, "connections", name, settings["source"])
+            conn_cls = getattr(_import(folder, "connections", name), "CONNECTION", None)
+            if not (isinstance(conn_cls, type) and issubclass(conn_cls, Connection)):
+                raise ExtensionError(f"{folder / '__init__.py'} must export CONNECTION, a Connection subclass")
+            connection = conn_cls()
         _check_options("connections", name, _own_settings(settings), connection.options)
         connections[name] = connection
     return connections

@@ -60,7 +60,9 @@ def install(config: AgentConfig, log=print, pip=None, check=check_mcp) -> int:
         log("installables.yaml lists no tools or connections; nothing to install.")
     for kind, name, settings in entries:
         log(f"{kind}/{name}")
-        if "mcp" in settings:
+        if settings.get("builtin"):
+            log("  ok: built in")
+        elif "mcp" in settings:
             packages = settings.get("pip") or []
             packages = [packages] if isinstance(packages, str) else list(packages)
             if packages:
@@ -85,7 +87,9 @@ def describe(config: AgentConfig) -> str:
         if not entries:
             lines.append("  (none)")
         for name, settings in entries.items():
-            if "mcp" in settings:
+            if settings.get("builtin"):
+                where = "built in"
+            elif "mcp" in settings:
                 where = "MCP: " + " ".join(settings["mcp"])
             else:
                 folder = source_dir(config.agent_dir, kind, name, settings["source"])
