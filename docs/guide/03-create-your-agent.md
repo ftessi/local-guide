@@ -75,8 +75,7 @@ Listed = enabled. After a change, run `python -m localagent install` again; `pyt
 
 ```yaml
 owner: [all]                                       # you see everything
-default_peer: [knowledge:shared, adapter:shared]   # other agents (page 7)
-peers: {}
+peers: {}                                          # agents you accepted (page 7)
 ```
 
 Next: [4. Run it](04-run-and-phone.md)

@@ -1,7 +1,9 @@
 import pytest
 
-from localagent.protocol.policy import PolicyError, load_policy
+from localagent.protocol.policy import PeerEntry, PolicyError, load_policy
 from localagent.protocol.scopes import InvalidScope, Scope
+
+BOB = "B" * 43
 
 
 def test_scope_checks():
@@ -25,16 +27,37 @@ def test_scope_string_instead_of_list():
 
 def test_defaults_when_missing(tmp_path):
     p = load_policy(tmp_path / "policy.yaml")
-    assert p.owner.is_all
-    assert p.for_peer("anyone").allows("knowledge", "shared")
-    assert not p.for_peer("anyone").allows("knowledge", "private")
+    assert p.owner.is_all and p.peers == {} and p.peer(BOB) is None
 
 
-def test_peer_override(tmp_path):
-    (tmp_path / "policy.yaml").write_text("peers:\n  abc: [tool:calendar:list]\n")
-    p = load_policy(tmp_path / "policy.yaml")
-    assert p.for_peer("abc").allows_tool("calendar", "list")
-    assert not p.for_peer("abc").allows("knowledge", "shared")
+def test_peer_entries(tmp_path):
+    (tmp_path / "policy.yaml").write_text(f"peers:\n  {BOB}: {{name: Bob, level: 1}}\n")
+    assert load_policy(tmp_path / "policy.yaml").peer(BOB) == PeerEntry("Bob", 1)
+
+
+def test_save_and_load_round_trip(tmp_path):
+    from localagent.protocol.policy import Policy, save_policy
+    policy = Policy(owner=Scope(["all"]), peers={BOB: PeerEntry("Bob's agent", 1)})
+    save_policy(tmp_path / "policy.yaml", policy)
+    text = (tmp_path / "policy.yaml").read_text(encoding="utf-8")
+    loaded = load_policy(tmp_path / "policy.yaml")
+    assert text.startswith("# Who may see what")
+    assert loaded.peers == policy.peers and loaded.owner.items == policy.owner.items
+
+
+@pytest.mark.parametrize("text, fragment", [
+    ("default_peer: [knowledge:shared]\n", "peers accept"),
+    (f"peers:\n  {BOB}: [knowledge:shared]\n", "name: \"Bob's agent\", level: 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, connection: demo, level: 1}}\n", "level: 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, level: 3}}\n", "only 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, level: true}}\n", "only 1"),
+    ("peers:\n  shortid: {name: Bob, level: 1}\n", "not an agent id"),
+    (f"peers:\n  {BOB}: {{name: '', level: 1}}\n", "name"),
+])
+def test_peer_format_errors(tmp_path, text, fragment):
+    (tmp_path / "policy.yaml").write_text(text)
+    with pytest.raises(PolicyError, match=fragment):
+        load_policy(tmp_path / "policy.yaml")
 
 
 @pytest.mark.parametrize("text, fragment", [
