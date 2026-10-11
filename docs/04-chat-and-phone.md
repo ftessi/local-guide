@@ -29,34 +29,30 @@ due reminders) once a minute. It does nothing useful until you add a connection.
 
 ### Where the phone app, calendar and tunnel come from
 
-They are not in this repository. They live in the extensions repository,
-`github.com/ftessi/local-guide-extensions` (private for now: ask its owner for access). Clone it next to
-`LocalAgent` and point `source:` at the folders inside it:
-
-```bash
-cd ..                      # the folder that contains LocalAgent
-git clone https://github.com/ftessi/local-guide-extensions.git
-cd LocalAgent
-```
+They are not in this repository: they live in the extensions repository,
+https://github.com/ftessi/local-guide-extensions. Point `source:` at it and `path:` at the folder inside:
 
 ```yaml
 # my-agent/installables.yaml
 tools:
   calendar:                          # reminders the agent can create, list and delete
-    source: ../../local-guide-extensions/tools/calendar     # relative to my-agent/
+    source: https://github.com/ftessi/local-guide-extensions.git
+    path: tools/calendar
     compartment: private
 connections:
   phone:                             # chat web app, push notifications, REST API for tools
-    source: ../../local-guide-extensions/connections/phone
+    source: https://github.com/ftessi/local-guide-extensions.git
+    path: connections/phone
     host: 127.0.0.1                  # keep local: the tunnel connects locally
     port: 8000
 ```
 
-Then `python -m localagent install` (it installs their Python packages too) and `python -m localagent serve`. Wait
-for `Phone app: http://127.0.0.1:8000`, open it in a browser, and enter your `AGENT_SECRET` (in `my-agent/.env`).
+Then `python -m localagent install`: it downloads the repository into `extensions/`, installs the packages each
+one needs, and checks it. `ref: <branch or tag>` pins a version. Wait for `Phone app: http://127.0.0.1:8000` after
+`python -m localagent serve`, open it in a browser, and enter your `AGENT_SECRET` (in `my-agent/.env`).
 
-A `source:` can also be a git URL, but only for a repository whose top level *is* the tool (it must contain the
-tool's `__init__.py`); `install` clones it into `extensions/`.
+To work on the extensions yourself, clone the repository anywhere and use a folder instead:
+`source: ../../local-guide-extensions` (relative to the agent folder) with the same `path:`.
 
 ## Reach it from your phone, from anywhere (Cloudflare Tunnel)
 
@@ -92,10 +88,12 @@ Cloudflare account. Once:
    ```yaml
    connections:
      phone:
-       source: ../../local-guide-extensions/connections/phone
+       source: https://github.com/ftessi/local-guide-extensions.git
+       path: connections/phone
        port: 8000
      cloudflare:
-       source: ../../local-guide-extensions/connections/cloudflare
+       source: https://github.com/ftessi/local-guide-extensions.git
+       path: connections/cloudflare
        tunnel: local-agent
    ```
 

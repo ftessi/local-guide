@@ -8,8 +8,9 @@ Each entry comes from one of:
   mcp: [command, args...]       tools only: any MCP server, e.g. [npx, -y, @modelcontextprotocol/server-filesystem]
 """
 import importlib.util
+import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from localagent.agent.tools.base import Notify, Tool
 from localagent.agent.tools.mcp_bridge import McpError, McpTool
@@ -17,7 +18,7 @@ from localagent.config import REPO_ROOT
 from localagent.connect.base import Connection, ConnectionContext
 
 EXTENSIONS_DIR = REPO_ROOT / "extensions"  # gitignored: where git sources are cloned, as <kind>/<name>/
-SOURCE_KEYS = {"source", "ref"}
+SOURCE_KEYS = {"source", "ref", "path"}
 MCP_KEYS = {"mcp", "pip", "cwd", "env", "actions", "fixed_args", "describe", "max_result_chars", "timeout"}
 
 
@@ -29,12 +30,24 @@ def is_remote(source: str) -> bool:
     return "://" in source or source.startswith("git@")
 
 
-def source_dir(agent_dir: Path, kind: str, name: str, source: str) -> Path:
-    """Where an entry's code is: its clone in extensions/, or the local folder (relative to the agent folder)."""
+def _inner_path(path: str | None) -> PurePosixPath:
+    """`path:` (a folder inside the source, e.g. tools/calendar) must stay inside it."""
+    inner = PurePosixPath((path or "").replace("\\", "/"))
+    if inner.is_absolute() or ".." in inner.parts or re.match(r"^[A-Za-z]:", str(inner)):
+        raise ExtensionError(f"path: '{path}' must be a folder inside the source, like tools/calendar")
+    return inner
+
+
+def source_dir(agent_dir: Path, kind: str, name: str, source: str, path: str | None = None) -> Path:
+    """Where an entry's code is: its clone in extensions/, or the local folder (relative to the agent folder),
+    plus `path:` when the code is in a subfolder (one repository holding several tools)."""
+    inner = _inner_path(path)
     if is_remote(source):
-        return EXTENSIONS_DIR / kind / name
-    path = Path(source).expanduser()
-    return path if path.is_absolute() else (Path(agent_dir) / path).resolve()
+        base = EXTENSIONS_DIR / kind / name
+    else:
+        base = Path(source).expanduser()
+        base = base if base.is_absolute() else (Path(agent_dir) / base).resolve()
+    return base / inner if inner.parts else base
 
 
 def _import(folder: Path, kind: str, name: str):
@@ -92,7 +105,7 @@ def load_tools(tools_config: dict, agent_dir: Path, data_root: Path, notify: Not
                 tool = mcp_tool(name, settings)
                 settings = {}
             else:
-                folder = source_dir(agent_dir, "tools", name, settings["source"])
+                folder = source_dir(agent_dir, "tools", name, settings["source"], settings.get("path"))
                 tool_cls = getattr(_import(folder, "tools", name), "TOOL", None)
                 if not (isinstance(tool_cls, type) and issubclass(tool_cls, Tool)):
                     raise ExtensionError(f"{folder / '__init__.py'} must export TOOL, a Tool subclass")
@@ -150,7 +163,7 @@ def load_connections(connections_config: dict, agent_dir: Path) -> dict[str, Con
             from localagent.connect.peer.tessera import TesseraConnection
             connection = TesseraConnection()
         else:
-            folder = source_dir(agent_dir, "connections", name, settings["source"])
+            folder = source_dir(agent_dir, "connections", name, settings["source"], settings.get("path"))
             conn_cls = getattr(_import(folder, "connections", name), "CONNECTION", None)
             if not (isinstance(conn_cls, type) and issubclass(conn_cls, Connection)):
                 raise ExtensionError(f"{folder / '__init__.py'} must export CONNECTION, a Connection subclass")

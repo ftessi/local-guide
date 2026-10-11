@@ -10,7 +10,6 @@
 | Very slow, `+cpu` or `CUDA: False` | pip replaced torch with a CPU build: reinstall the CUDA build (page 2, step 4) |
 | `bitsandbytes` errors on Mac or CPU | 4-bit needs an NVIDIA GPU: set `quantization: none` (or `fp16` on a GPU) |
 | Model download fails for Llama / Gemma | Gated model: `huggingface-cli login` first |
-| `pip install -r requirements.txt` fails on Mac or CPU | It pins the NVIDIA cu118 torch build: use the commands on page 2 instead |
 
 ## Chat and the model
 

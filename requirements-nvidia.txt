@@ -1,0 +1,4 @@
+# NVIDIA GPUs: everything in requirements.txt, plus 4-bit models (bitsandbytes needs an NVIDIA GPU).
+# Install the CUDA build of PyTorch first (docs/02-install.md).
+-r requirements.txt
+bitsandbytes>=0.50.0

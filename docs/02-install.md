@@ -73,20 +73,12 @@ pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
 
 ## 4. Install everything else
 
-The same for every path:
-
 ```bash
-pip install "transformers>=4.40.0" "accelerate>=0.27.0" peft==0.21.2 pyyaml "cryptography>=42" python-dotenv "mcp>=1.20,<2" pytest
+pip install -r requirements.txt            # Mac and CPU only
+pip install -r requirements-nvidia.txt     # NVIDIA: the same, plus bitsandbytes for 4-bit models
 ```
 
-NVIDIA only, for 4-bit models:
-
-```bash
-pip install "bitsandbytes>=0.50.0"
-```
-
-(`requirements.txt` lists the same packages for the NVIDIA cu118 setup: `pip install -r requirements.txt` works
-there, but on other setups it would try to install the cu118 build of torch, so use the commands above.)
+Neither file contains PyTorch, so the build you installed in step 3 stays.
 
 **NVIDIA: check that torch still sees the GPU.** pip sometimes replaces it:
 

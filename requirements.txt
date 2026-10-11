@@ -1,9 +1,12 @@
---extra-index-url https://download.pytorch.org/whl/cu118
-# Model runtime (install torch FIRST — see docs/02-install.md)
-torch==2.7.1+cu118
+# Everything LocalAgent needs, on every computer. Install PyTorch for your machine FIRST (docs/02-install.md):
+#   NVIDIA:  pip install "torch==2.7.1+cu118" --index-url https://download.pytorch.org/whl/cu118   (or cu121)
+#   Mac:     pip install torch==2.7.1
+#   CPU:     pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+# then:      pip install -r requirements.txt          (NVIDIA: pip install -r requirements-nvidia.txt)
+
+# Model runtime
 transformers>=4.40.0
 accelerate>=0.27.0
-bitsandbytes>=0.50.0
 
 # LoRA adapters: training (python -m localagent train) and loading per session
 peft==0.21.2

@@ -82,7 +82,7 @@ The first install of `files` and `terminal` takes a minute (npx downloads them).
 |---|---|
 | `mcp` | The command that starts the server. `python` means the agent's own Python (the venv); `npx -y <package>` downloads and runs an npm package. |
 | `pip` | Python package(s) to install for it. |
-| `source` / `ref` | A folder (relative to the agent folder) or a git URL with your own tool; `ref` = branch or tag. |
+| `source` / `ref` / `path` | A folder (relative to the agent folder) or a git URL with your own tool; `ref` = branch or tag; `path` = the folder inside it, when one repository holds several tools (e.g. `tools/calendar`). |
 | `actions` | Which of the server's actions the model sees. **Keep it short:** small models get confused by long lists. Leave it out once and `install` lists them all. |
 | `describe` | Your own wording for an action, replacing the server's (often long, written for big models). |
 | `fixed_args` | Arguments always filled in for the model and hidden from it. |
@@ -214,7 +214,7 @@ phone connection in the extensions repository is the reference example.
 
 ## Sharing a tool
 
-Put it in its own git repository with `__init__.py` at the top level, and tell others to use
-`source: <its git URL>`. There is no central catalogue.
+Push it to a git repository and tell others to use `source: <its git URL>`, plus `path: <folder>` if the tool isn't
+at the repository's top level (one repository can hold several tools). There is no central catalogue.
 
 Next: [7. Training](07-training.md)

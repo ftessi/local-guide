@@ -20,22 +20,25 @@ def _pip(requirements: list[str]) -> None:
 
 def fetch_source(agent_dir: Path, kind: str, name: str, settings: dict, log=print) -> Path:
     """Clone or update a git source into extensions/<kind>/<name>/; a local folder is used as it is."""
-    source, ref = settings["source"], settings.get("ref")
-    folder = source_dir(agent_dir, kind, name, source)
+    source, ref, path = settings["source"], settings.get("ref"), settings.get("path")
+    folder = source_dir(agent_dir, kind, name, source, path)
     if not is_remote(source):
         if not (folder / "__init__.py").is_file():
             raise ExtensionError(f"{kind}.{name}: {folder} has no __init__.py")
         return folder
-    if (folder / ".git").is_dir():
+    clone = source_dir(agent_dir, kind, name, source)
+    if (clone / ".git").is_dir():
         log(f"  updating {source}")
-        _run(["git", "-C", str(folder), "fetch", "--quiet", "--depth", "1", "origin", ref or "HEAD"])
-        _run(["git", "-C", str(folder), "checkout", "--quiet", "--detach", "FETCH_HEAD"])
+        _run(["git", "-C", str(clone), "fetch", "--quiet", "--depth", "1", "origin", ref or "HEAD"])
+        _run(["git", "-C", str(clone), "checkout", "--quiet", "--detach", "FETCH_HEAD"])
     else:
         log(f"  downloading {source}")
-        folder.parent.mkdir(parents=True, exist_ok=True)
-        _run(["git", "clone", "--quiet", "--depth", "1", *(["--branch", ref] if ref else []), source, str(folder)])
+        clone.parent.mkdir(parents=True, exist_ok=True)
+        _run(["git", "clone", "--quiet", "--depth", "1", *(["--branch", ref] if ref else []), source, str(clone)])
     if not (folder / "__init__.py").is_file():
-        raise ExtensionError(f"{kind}.{name}: {source} has no __init__.py at its top level")
+        where = f"{path}/" if path else "its top level"
+        raise ExtensionError(f"{kind}.{name}: {source} has no __init__.py in {where}"
+                             + ("" if path else " (if the code is in a subfolder, add path: <subfolder>)"))
     return folder
 
 
@@ -92,8 +95,9 @@ def describe(config: AgentConfig) -> str:
             elif "mcp" in settings:
                 where = "MCP: " + " ".join(settings["mcp"])
             else:
-                folder = source_dir(config.agent_dir, kind, name, settings["source"])
+                folder = source_dir(config.agent_dir, kind, name, settings["source"], settings.get("path"))
                 state = "" if (folder / "__init__.py").is_file() else "   [not installed: run install]"
-                where = f"{settings['source']}{state}"
+                inside = f" ({settings['path']})" if settings.get("path") else ""
+                where = f"{settings['source']}{inside}{state}"
             lines.append(f"  {name:<12} {where}")
     return "\n".join(lines)

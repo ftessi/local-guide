@@ -72,9 +72,7 @@ never letting adapter files leave your machine.
 
 **Next:**
 - Run Tessera between **two computers** over a real network (page 8 has the commands).
-- **Publish** `tessera-protocol` and make the extensions repository (phone app, calendar, tunnel) reachable by
-  others; today it is private, and a `source:` git URL must point at a repository whose top level is the tool.
-- Make `requirements.txt` install on every platform (today it pins the NVIDIA cu118 build of torch).
+- **Publish** `tessera-protocol`.
 
 **Then:**
 - The internal model learning everything shared with every connection (decision 5).

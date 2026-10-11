@@ -161,3 +161,31 @@ def test_follow_errors(tmp_path, follow, fragment):
     with pytest.raises(ExtensionError, match=fragment):
         load_tools({"notes": {"source": NOTES_SOURCE, "follow": follow}}, tmp_path, tmp_path / "data", None,
                    ["private", "shared"])
+
+
+def test_a_source_can_point_into_a_subfolder(tmp_path):
+    assert source_dir(tmp_path, "tools", "x", "https://github.com/a/b.git", "tools/x").parts[-5:] == \
+        ("extensions", "tools", "x", "tools", "x")
+    assert source_dir(tmp_path / "agent", "tools", "x", "../repo", "tools/x") == (tmp_path / "repo/tools/x").resolve()
+
+
+@pytest.mark.parametrize("bad", ["../escape", "/abs/olute", "C:/abs", "tools/../../x"])
+def test_path_must_stay_inside_the_source(tmp_path, bad):
+    with pytest.raises(ExtensionError, match="path"):
+        source_dir(tmp_path, "tools", "x", "https://github.com/a/b.git", bad)
+
+
+def test_install_a_tool_from_a_subfolder_of_a_git_repo(tmp_path, monkeypatch):
+    origin = tmp_path / "origin"  # one repo holding several tools, like local-guide-extensions
+    shutil.copytree(FAKE_EXTENSIONS / "tools/notes", origin / "tools/notes", ignore=shutil.ignore_patterns("__pycache__"))
+    (origin / "README.md").write_text("several tools\n")
+    _git("init", "-q", "-b", "main", cwd=origin)
+    _commit(origin, "tools")
+    monkeypatch.setattr("localagent.extensions.EXTENSIONS_DIR", tmp_path / "ext")
+    d = write_agent_yaml(tmp_path / "a", installables=(f"tools:\n  notes:\n    source: file://{origin.as_posix()}\n"
+                                                      "    path: tools/notes\n"))
+    config = load_config(d)
+    assert install(config, log=lambda m: None, pip=lambda p: None) == 0
+    assert (tmp_path / "ext/tools/notes/tools/notes/__init__.py").is_file()
+    assert "notes" in load_tools(config.installables.tools, d, tmp_path / "data", None, ["private"])
+    assert "tools/notes" in describe(config)
