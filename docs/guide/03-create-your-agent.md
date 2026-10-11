@@ -28,7 +28,7 @@ my-agent/
 ├── identity/         keypair (agent.pub = your agent id)
 ├── knowledge/
 │   ├── private/      facts only you see
-│   └── shared/       facts you may offer to connected agents
+│   └── shared/       an example extra compartment (nothing is shared automatically)
 ├── memory/           conversation logs (written automatically)
 ├── work/             active tasks/projects
 ├── training/         examples + trained adapters (page 6)

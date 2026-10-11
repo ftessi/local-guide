@@ -1,6 +1,6 @@
 # Local Agent Ecosystem — Restructure Design Spec
 Date: 2026-10-11
-Supersedes the file layout (§3) of `2026-10-05-local-agent-protocol-design.md`. The protocol concepts of that spec (purpose, offered/requested/granted scope, no mid-session scope expansion, dual-layer enforcement) still apply and are extended here.
+Supersedes the file layout (§3) of the original v0.1 protocol sketch (since replaced by Tessera, `docs/design/2026-10-11-secrets-poc-and-tessera-design.md`). The protocol concepts of that sketch (purpose, offered/requested/granted scope, no mid-session scope expansion, dual-layer enforcement) still apply and are extended here.
 
 ---
 
@@ -101,7 +101,6 @@ LocalAgent/                          # shared repo
 ├── models/                          # shared HuggingFace cache (HF_HOME) — gitignored
 ├── scripts/
 │   ├── new_agent.py                 # copy template, generate keypair + AGENT_SECRET
-│   ├── migrate_legacy.py            # move pre-restructure data into my-agent/
 │   ├── diagnose.py                  # hardware report + recommendation (replaces diagnose_gpu.py)
 │   ├── smoke_test_model.py          # reads model from agent.yaml
 │   ├── benchmark.py                 # reads model from agent.yaml unless --model given
@@ -374,7 +373,7 @@ python -m localagent chat  [--agent DIR]
 
 ## 12. Migration
 
-`scripts/migrate_legacy.py [--agent my-agent] [--dry-run]`:
+Planned, never built (there is no `scripts/migrate_legacy.py`; move old data by hand). The steps it would have taken:
 1. If the agent folder doesn't exist, create it from `agent_template/` (including a new keypair).
 2. Move `knowledge/private/*` → `my-agent/knowledge/private/` and `knowledge/public/*` → `my-agent/knowledge/shared/`.
 3. Move `calendar.db` → `my-agent/data/calendar/calendar.db` and `push_subscriptions.json` → `my-agent/data/`.
@@ -418,4 +417,3 @@ The model is always mocked or faked; no test loads real weights.
 | `test_agent_core.py` | tool-call parsing, read-action second round, 2-round cap, tag stripping, history from memory |
 | `test_calendar_tool.py` | ported calendar tests |
 | `test_owner_server.py` | ported server tests against the new routes |
-| `test_migrate_legacy.py` | moves, no-overwrite, dry run |

@@ -1,6 +1,6 @@
 # Local Guide: your own AI agent, on your own computer
 
-Run a local language model as a personal agent, teach it about you, give it tools (web, files, terminal, calendar, …), reach it from your phone, and later train it and connect it to your friends' agents, with you deciding exactly what each one can see.
+Run a local language model as a personal agent, teach it about you, give it tools (web, files, terminal, calendar, …), reach it from your phone, train it on your own data, and connect it to your friends' agents, with you deciding exactly what each one can see.
 
 > **New here?** Follow the step-by-step setup guide: [`docs/guide/`](docs/guide/README.md). This README is the map of the project, for anyone who wants to change it.
 
@@ -87,16 +87,16 @@ my-agent/
 ├── policy.yaml         who may see what (you, other agents)
 ├── .env                secrets (AGENT_SECRET). Never share.
 ├── identity/           your agent's keypair; agent.pub is its public id
-├── knowledge/<compartment>/   facts it always knows (.md/.txt), e.g. private/, shared/
+├── knowledge/<compartment>/   facts it always knows (.md/.txt), e.g. private/ (shared/ is just an example extra one)
 ├── memory/<compartment>/      conversations, written automatically
 ├── work/               active tasks (.md with a compartment/status header)
-├── training/           examples and trained adapters (coming later)
+├── training/           examples and trained adapters (`examples`, `train`, `export`)
 ├── workspace/          the folder the files/terminal tools work in
 ├── data/<name>/        each tool's and connection's own storage (calendar.db, push keys, server logs…)
 └── audit.log           sessions opened and requests refused
 ```
 
-**Compartments** (`private`, `shared`, or any you add in `agent.yaml`) are how data protection works: every file, memory and tool belongs to one, and `policy.yaml` says which compartments each kind of session can see. Your own chats see everything; another agent sees only what you allow.
+**Compartments** (`private`, `shared`, or any you add in `agent.yaml`) are how data protection works: every file, memory and tool belongs to one, and `policy.yaml` says which compartments each kind of session can see. Your own chats see everything. `shared` is only an example extra compartment: nothing is shared automatically. To share with another agent, put what you share in a connection compartment, train it into its own adapter, and serve it from a Tessera-facing agent ([guide page 7](docs/guide/07-connect-to-others.md)).
 
 ## 4. Installables: tools and connections
 

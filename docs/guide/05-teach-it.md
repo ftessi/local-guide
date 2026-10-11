@@ -1,13 +1,13 @@
 # 5. Teach it
 
-Your agent knows four kinds of things, and each piece is labeled with a **compartment**: `private` (only you) or `shared` (may be offered to connected agents). You can add your own compartments in `agent.yaml`, such as `family` or `work`.
+Your agent knows four kinds of things, and each piece is labeled with a **compartment**: `private` (only you) or any compartment you add. `shared` is just an example name: nothing is shared with other agents automatically (to share, see page 7). You can add your own compartments in `agent.yaml`, such as `family` or `work`.
 
 ## Knowledge: facts it always knows
 
 Drop `.md` or `.txt` files in:
 
 - `my-agent/knowledge/private/`: about you (name, family, preferences, health…)
-- `my-agent/knowledge/shared/`: things you're happy for other agents to know (interests, public bio, how you like to be contacted)
+- `my-agent/knowledge/shared/`: an example extra compartment for facts you'd keep apart from private ones; your own agent reads it, other agents do not
 
 They're read fresh on every message, so no restart is needed. Keep them short: everything here goes into the model's context on every turn, and small models have little room.
 

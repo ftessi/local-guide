@@ -157,6 +157,6 @@ sc stop cloudflared
 - Session storage caches the token — clear site data in browser settings to re-enter it
 
 **Push notifications not arriving:**
-- VAPID keys must be set in `my-agent/.env` (created automatically by `scripts/new_agent.py`) before the server starts
+- Push comes from the phone app installable, not the core. Follow its own setup (its VAPID keys, if it uses them, are not created by `scripts/new_agent.py`)
 - On iOS, PWA must be installed to home screen (not just open in browser) for push to work
 - Check browser console for push registration errors

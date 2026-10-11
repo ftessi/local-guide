@@ -2,7 +2,7 @@
 Date: 2026-10-11
 Status: draft for review
 Builds on: `2026-10-11-ecosystem-restructure-design.md` (layers, compartments, guard).
-Replaces: the peer protocol of `2026-10-05-local-agent-protocol-design.md` (v0.1 handshake), which was a starting point only.
+Replaces: the peer protocol of the original v0.1 sketch, since replaced by Tessera (`docs/design/2026-10-11-secrets-poc-and-tessera-design.md`).
 
 ---
 

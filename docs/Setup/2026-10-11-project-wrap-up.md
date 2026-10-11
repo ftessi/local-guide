@@ -1,4 +1,6 @@
 # Project wrap-up — where LocalAgent stands
+> Snapshot of 2026-10-11, before the secrets/Tessera proof of concept. Current state: `docs/Setup/2026-10-11-tessera-demo.md`, `docs/Setup/2026-10-11-secrets-adapters-run.md`, `docs/design/2026-10-11-secrets-poc-and-tessera-design.md`.
+
 Date: 2026-10-11 · Branch `restructure-ecosystem` (12 commits ahead of `master`, last 4 not pushed)
 
 A snapshot of everything built so far, what works, what is only scaffolding, and the base for the next
@@ -10,8 +12,8 @@ three sub-projects: **data access**, **training**, and a **new agent↔agent pro
 
 | Date | What happened | Record |
 |---|---|---|
-| 10-05 | Model installed and running on the GTX 1050; first design (agent + zero-trust protocol v0.1) | `docs/Setup/2026-10-05-*.md`, `docs/design/2026-10-05-local-agent-protocol-design.md` |
-| 10-05/06 | Phase 1 agent core; phone chat app (PWA), calendar reminders, push notifications | `docs/plans/2026-10-05-*.md` |
+| 10-05 | Model installed and running on the GTX 1050; first design (agent + zero-trust protocol v0.1) | first v0.1 protocol sketch (since replaced by Tessera); the 10-05 records were removed (see git history) |
+| 10-05/06 | Phase 1 agent core; phone chat app (PWA), calendar reminders, push notifications | plans removed (see git history) |
 | 10-11 | **Restructure** into layers (runtime / vault / protocol / agent / training / connect); one shared repo + one private agent folder per person | `docs/design/2026-10-11-ecosystem-restructure-design.md` |
 | 10-11 | Tools and connections moved out of the core into **installables** (own folders, git repos, or MCP servers); web, files and terminal tools added | `docs/guide/05b-give-it-abilities.md` |
 | 10-11 | Real-use fixes: no text written before a tool call is shown, persistent `reset`, up to 3 tool calls per reply, tool-use announcement | git log |

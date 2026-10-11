@@ -24,7 +24,7 @@ runtime/     the model behind one interface
 | `vault` | Reads/writes the agent folder; every item has a compartment label | nothing in `localagent` |
 | `protocol` | Decides who sees what: sessions, scopes, policy, audit, training sets | `vault` |
 | `agent` | One conversation turn; tools | `protocol.session`, `runtime.base` |
-| `training` | Dataset format (training runs come later) | `protocol`, `runtime` |
+| `training` | Dataset format, LoRA training, adapter export and evaluation | `protocol`, `runtime` |
 | `connect` | Connection interface, `serve` loop, terminal; installed connections plug in here | `protocol`, `agent`, `runtime` |
 
 `tests/test_layers.py` fails if any import breaks these rules. Outside the layers: `config.py` (reads `agent.yaml`, `installables.yaml`, `.env`), `extensions.py` and `installer.py` (find, load and install tools/connections), `bootstrap.py` (wires layers and extensions for one agent), `setup_agent.py` (creates agent folders), `testing.py` (FakeBackend), `__main__.py` (CLI).

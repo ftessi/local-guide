@@ -1,6 +1,6 @@
 # Local Agent: Setup Guide
 
-Run your own AI agent on your own computer, teach it about you, and (soon) connect it to other people's agents, with you deciding exactly what each one can see.
+Run your own AI agent on your own computer, teach it about you, and connect it to other people's agents, with you deciding exactly what each one can see.
 
 Follow the pages in order:
 
@@ -12,8 +12,8 @@ Follow the pages in order:
 | 4 | [Run it, then reach it from your phone](04-run-and-phone.md) | Chat in the terminal and on your phone, with reminders |
 | 5 | [Teach it](05-teach-it.md) | Knowledge, compartments, tools |
 | 5b | [Give it abilities](05b-give-it-abilities.md) | It can read web pages, write files and run commands |
-| 6 | [Train it](06-train-it.md) | *Coming later*: your own fine-tuned adapters |
-| 7 | [Connect to others](07-connect-to-others.md) | *Coming later*: agent-to-agent connections |
+| 6 | [Train it](06-train-it.md) | Your own fine-tuned adapters |
+| 7 | [Connect to others](07-connect-to-others.md) | Agent-to-agent connections, one trained compartment per friend |
 
 How it fits together: [`../architecture.md`](../architecture.md).
 
