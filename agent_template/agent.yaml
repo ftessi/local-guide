@@ -10,7 +10,7 @@ model:
   max_prompt_chars: 8000         # longest prompt, in characters; lower it if you get "Out of GPU memory"
 
 # Data compartments. 'private' = only you. 'shared' is just an example extra one; nothing is shared automatically.
-# To share with another agent, use a connection compartment (guide page 7).
+# To share with another agent, use a connection compartment (docs/08-connecting-agents.md).
 # Add your own (lowercase, digits, '-'), e.g. family, work.
 compartments: [private, shared]
 

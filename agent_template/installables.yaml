@@ -3,7 +3,7 @@
 #   source: a folder or git URL with your own (or a friend's) tool/connection code
 #   mcp:    a command that runs an MCP server (tools only): ready-made tools from the internet
 # Uncomment what you want, then run:   python -m localagent install
-# Guide: docs/guide/05-teach-it.md. Writing your own: README.md §4.
+# Guide: docs/06-tools.md (tools, and writing your own) and docs/04-chat-and-phone.md (phone app, tunnel).
 # "{agent}" is replaced by this folder's path.
 
 tools:

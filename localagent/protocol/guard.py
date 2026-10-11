@@ -149,7 +149,7 @@ class Protocol:
     def accept_peer(self, agent_id: str, *, name: str, level: int = 1) -> PeerEntry:
         if self.connection() is None:
             raise PolicyError("Only a Tessera-facing agent accepts peers: its agent.yaml lists exactly one "
-                              "compartment, not private (docs/guide/07-connect-to-others.md)")
+                              "compartment, not private (docs/08-connecting-agents.md)")
         entry = make_peer_entry(agent_id, name, level)
         self._save({**self._fresh_policy().peers, agent_id: entry})
         self._set_request_status(agent_id, "accepted")

@@ -147,7 +147,7 @@ class TesseraConnection(Connection):
         if problems:
             raise SetupError("This agent folder can't face other agents:\n- " + "\n- ".join(problems) +
                              "\nPeers must reach a separate agent folder that holds only exported connection "
-                             "adapters (docs/guide/07-connect-to-others.md).")
+                             "adapters (docs/08-connecting-agents.md).")
         no_adapter = missing_adapter(ctx.config)
         if no_adapter:
             raise SetupError(f"This agent folder has {no_adapter}")
