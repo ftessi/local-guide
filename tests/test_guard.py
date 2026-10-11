@@ -4,6 +4,7 @@ import pytest
 
 from localagent.protocol.guard import AuthError, Protocol
 from localagent.protocol.identity import generate_identity, load_agent_id
+from localagent.protocol.policy import PolicyError
 from localagent.protocol.scopes import Scope
 from localagent.protocol.session import Session
 from localagent.vault.store import Vault
@@ -63,9 +64,6 @@ def test_training_set_exact_compartment(agent_dir):
         p.training_set("peer:x")
 
 
-def test_peer_sessions_not_yet_supported(agent_dir):
-    with pytest.raises(NotImplementedError):
-        proto(agent_dir).open_peer_session({})
 
 
 def test_identity(tmp_path):
@@ -129,3 +127,80 @@ def test_prompt_texts():
     from localagent.protocol.prompts import OWNER_BASE_PROMPT, PEER_SYSTEM_PROMPT, REFUSAL
     assert REFUSAL == "I can't share that."
     assert PEER_SYSTEM_PROMPT.endswith(REFUSAL) and BASE_PROMPT == OWNER_BASE_PROMPT
+
+
+BOB = "B" * 43
+EVE = "E" * 43
+
+
+def demo_side(tmp_path):
+    """A Tessera-facing agent: exactly one compartment, its connection's."""
+    (tmp_path / "knowledge/demo").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "knowledge/demo/notes.md").write_text("SHARED-NOTES-ONLY-FOR-THE-OWNER")
+    return Protocol.for_agent(tmp_path, ["demo"], tools={}, owner_secret="t")
+
+
+def test_strangers_get_nothing_and_are_recorded_once(tmp_path):
+    p = demo_side(tmp_path)
+    assert p.peer_grant(BOB, 1) is None
+    for _ in range(3):
+        p.record_request(BOB, "Review contract v3", 1)
+    assert [(r["id"], r["purpose"], r["status"]) for r in p.requests()] == [(BOB, "Review contract v3", "pending")]
+    with pytest.raises(AuthError):
+        p.open_peer_session(BOB)
+
+
+def test_accepting_writes_the_policy_and_grants_one_connection(tmp_path):
+    p = demo_side(tmp_path)
+    p.record_request(BOB, "Review", 1)
+    entry = p.accept_peer(BOB, name="Bob")
+    assert entry.level == 1 and p.requests() == [] and p.connection() == "demo"
+    assert "Bob" in (tmp_path / "policy.yaml").read_text(encoding="utf-8")
+    assert p.peer_grant(BOB, 4).level == 1  # never more than the owner set
+    assert p.peer_grant(BOB, 0) is None
+    s = p.open_peer_session(BOB)
+    assert s.principal == f"peer:{BOB}" and s.memory_compartment == f"peer:{BOB}"
+    assert s.tools() == [] and s.context() == []
+    assert sorted(s.scope.items) == [f"adapter:demo", f"memory:peer:{BOB}"]
+
+
+def test_only_a_tessera_facing_agent_accepts_peers(tmp_path):
+    internal = Protocol.for_agent(tmp_path, ["private", "demo"], tools={}, owner_secret="t")
+    assert internal.connection() is None
+    with pytest.raises(PolicyError, match="Tessera-facing"):
+        internal.accept_peer(BOB, name="Bob")
+    assert Protocol.for_agent(tmp_path / "p", ["private"], tools={}, owner_secret="t").connection() is None
+
+
+def test_rejected_agents_stay_rejected(tmp_path):
+    p = demo_side(tmp_path)
+    p.record_request(EVE, "Let me in", 1)
+    p.reject_request(EVE)
+    p.record_request(EVE, "Please", 1)
+    assert p.requests() == []
+
+
+def test_removal_is_seen_by_a_running_protocol(tmp_path):
+    p = demo_side(tmp_path)
+    p.accept_peer(BOB, name="Bob")
+    other_process = demo_side(tmp_path)
+    assert other_process.peer_grant(BOB, 1) is not None
+    p.remove_peer(BOB)
+    assert other_process.peer_grant(BOB, 1) is None
+
+
+def test_peers_listed_on_an_internal_agent_get_nothing(tmp_path):
+    demo_side(tmp_path).accept_peer(BOB, name="Bob")
+    internal = Protocol.for_agent(tmp_path, ["private", "demo"], tools={}, owner_secret="t")
+    assert internal.peer_grant(BOB, 1) is None
+    assert "tessera_not_facing" in (tmp_path / "audit.log").read_text()
+
+
+def test_records(tmp_path):
+    p = demo_side(tmp_path)
+    p.record_envelope(BOB, "s-1", {"seq": 0})
+    p.record_envelope(BOB, "s-1", {"seq": 1})
+    assert p.read_record(BOB, "s-1") == [{"seq": 0}, {"seq": 1}]
+    assert (tmp_path / f"tessera/{BOB}/s-1.jsonl").is_file()
+    with pytest.raises(ValueError):
+        p.record_envelope("../../etc", "s-1", {})

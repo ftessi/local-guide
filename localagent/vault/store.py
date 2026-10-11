@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 KINDS = ("knowledge", "memory", "work", "training")
 PEER_PREFIX = "peer:"
 _FRONT_MATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)(.*)\Z", re.DOTALL)
+_TESSERA_NAME = re.compile(r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$")
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,18 @@ class Vault:
         with path.open("a", encoding="utf-8") as fh:
             for record in records:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def _tessera_file(self, relative: str) -> Path:
+        if not isinstance(relative, str) or not _TESSERA_NAME.match(relative):
+            raise ValueError(f"Bad Tessera record name '{relative}'")
+        return self.root / "tessera" / f"{relative}.jsonl"
+
+    def append_tessera(self, relative: str, record: dict) -> None:
+        """tessera/<relative>.jsonl: session records (<agent id>/<session id>) and connection requests."""
+        self._append_jsonl(self._tessera_file(relative), [record])
+
+    def read_tessera(self, relative: str) -> list[dict]:
+        return [record for _, record in self._jsonl(self._tessera_file(relative))]
 
     def append_memory(self, compartment: str, record: dict) -> None:
         if compartment not in self.compartments and not compartment.startswith(PEER_PREFIX):
