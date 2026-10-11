@@ -11,7 +11,7 @@ TIME = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
 SESSION = "s-0123456789abcdef"
 CANONICAL_CASES = [
     {"b": 1, "a": [True, None, -5], "c": "x"},
-    {"text": "é\n\u0001\"\/"},
+    {"text": "é\n\u0001\"\\/"},
     {"\ufb01": 1, "\U0001F600": 2},
 ]
 
@@ -36,6 +36,7 @@ def build_vectors() -> dict:
               body={"text": "What is the shared secret?"})
     add("answer", a, type="answer", session=SESSION, to=b.agent_id, seq=3, prev=envelope_hash(ask),
         body={"text": "The shared secret is GREEN-LANTERN-7.", "binding": False})
+    # refuse and error are standalone examples, not part of the hello -> answer chain.
     add("refuse", a, type="refuse", session="", to=b.agent_id, seq=1, prev=envelope_hash(hello), body={})
     add("error", a, type="error", session="", to=b.agent_id, seq=-1, prev="", body={"code": "bad_chain"})
     return {"tessera": VERSION,

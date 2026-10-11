@@ -15,5 +15,5 @@ OUT = ROOT / "tests" / "data" / "tessera_vectors_v0.1.json"
 
 if __name__ == "__main__":
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(build_vectors(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    OUT.write_bytes((json.dumps(build_vectors(), indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     print(f"Wrote {OUT}")
