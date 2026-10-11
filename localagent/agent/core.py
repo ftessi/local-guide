@@ -147,32 +147,43 @@ class Agent:
                 to_model = "I allowed it. " + _results_message(approved, include_failed=True)
                 yield from (notice(lines) for lines in _report(pending, approved) if lines)
             recent = self._recent.get(session)
-            system = build_system_prompt(session.context(), session.tools(), self._clock(),
+            views = session.tools()
+            system = build_system_prompt(session.context(), views, self._clock(),
                                          recent=recent[0] if recent else "")
             system_message = {"role": "system", "content": system}
             history = session.history(self.history_turns)
             this_turn = [{"role": "user", "content": to_model}]
             for round_no in range(1, MAX_ROUNDS + 1):
+                # A reply that may call a tool is held back until it's finished: small models write guesses
+                # before the tool tag ("based on my knowledge, CDU 48%…"). If it calls a tool, that text is
+                # dropped and only the answer written from the real results is shown.
+                hold_back = round_no < MAX_ROUNDS and bool(views)
                 if round_no > 1 and shown:
                     yield "\n\n"
                 visible, parts = VisibleText(), []
                 messages = _fit(system_message, history, this_turn, self.max_prompt_chars)
                 for chunk in self.backend.generate_stream(messages, self.max_new_tokens):
                     parts.append(chunk)
-                    out = visible.feed(chunk)
+                    out = "" if hold_back else visible.feed(chunk)
                     if out:
                         shown = True
                         yield out
-                tail = visible.flush()
+                tail = "" if hold_back else visible.flush()
                 if tail:
                     shown = True
                     yield tail
                 raw = "".join(parts)
                 said = strip_tool_tags(raw)
-                texts.append(said)
                 calls, errors = parse_tool_calls(raw)
                 for error in errors:
                     log.warning("Ignored tool call: %s", error)
+                if hold_back:
+                    if calls:
+                        said = ""
+                    elif said:
+                        yield ("\n\n" if shown else "") + said
+                        shown = True
+                texts.append(said)
                 if round_no == MAX_ROUNDS:
                     if calls:
                         log.warning("Ignored %d tool call(s) in the final round", len(calls))
@@ -194,7 +205,9 @@ class Agent:
                     break
                 results = {"role": "user", "content": _results_message(reads)}
                 transcript.append(results)
-                this_turn = this_turn + [{"role": "assistant", "content": raw}, results]
+                # The model sees its call, not the guesses it wrote around it, next to the real results.
+                this_turn = this_turn + [{"role": "assistant", "content": _canonical(said, calls, round_outcomes)},
+                                         results]
             self._remember_results(session, read_outcomes)
             reply = "\n\n".join(t for t in texts if t)
             session.record({"user": user_message, "assistant": reply, "transcript": transcript,

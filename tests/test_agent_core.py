@@ -43,7 +43,7 @@ def test_write_tool_executed_and_hidden(env):
     _, tools, proto = env
     agent, backend = make_agent(tools, ["Reminder set! " + CREATE])
     reply = agent.respond(proto.open_owner_session("t"), "remind me")
-    assert reply == "Reminder set!\n\n(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"  # what really ran is always shown
+    assert reply == "(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"  # what really ran; the text written before the call is dropped
     assert [n["text"] for n in tools["notes"].notes] == ["Dentist"]
     assert len(backend.calls) == 1
 
@@ -53,7 +53,7 @@ def test_read_tool_gets_second_round(env):
     tools["notes"].run("add", {"text": "Dentist", "due": "2030-01-01T10:00:00"})
     agent, backend = make_agent(tools, ["Let me check. " + LIST, "You have: Dentist."])
     reply = agent.respond(proto.open_owner_session("t"), "what reminders?")
-    assert reply == "Let me check.\n\n(used notes.list)\n\nYou have: Dentist."
+    assert reply == "(used notes.list)\n\nYou have: Dentist."
     assert backend.calls[1][-1]["content"].startswith("Tool results")
     assert "Dentist" in backend.calls[1][-1]["content"]
 
@@ -87,7 +87,7 @@ def test_stream_never_shows_tags(env):
     chunks = list(agent.respond_stream(proto.open_owner_session("t"), "x"))
     assert "<tool" not in "".join(chunks)
     streamed = "".join(chunks).replace(" \n", "\n")  # the space before a hidden tag may stream out
-    assert streamed == "Reminder set!\n\n(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"
+    assert streamed == "(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"
 
 
 def test_history_included_next_turn(env):
@@ -251,3 +251,23 @@ def test_prompt_budget_shortens_a_huge_tool_result(env):
     second_round = backend.calls[1]
     assert sum(len(m["content"]) for m in second_round) <= 4000
     assert second_round[-1]["content"].startswith("Tool results") and "[cut to fit" in second_round[-1]["content"]
+
+
+def test_guess_written_before_a_tool_call_is_never_shown_or_remembered(env):
+    """A real 1.5B reply: invented numbers, then the search. Only the answer from the results may be shown."""
+    _, tools, proto = env
+    guess = "Based on my knowledge, the CDU won with 48%. "
+    agent, backend = make_agent(tools, [guess + LIST, "According to the results: no notes.", "ok"])
+    session = proto.open_owner_session("t")
+    chunks = list(agent.respond_stream(session, "what are the results?"))
+    shown = "".join(chunks)
+    assert "48%" not in shown and shown.endswith("According to the results: no notes.")
+    assert not any("48%" in m["content"] for m in backend.calls[1])  # the model answers from results, not its guess
+    agent.respond(session, "thanks")
+    assert not any("48%" in m["content"] for m in backend.calls[2])  # and never sees the guess again
+
+
+def test_plain_answer_without_tools_is_shown_whole(env):
+    _, tools, proto = env
+    agent, _ = make_agent(tools, ["Just a normal answer."])
+    assert "".join(agent.respond_stream(proto.open_owner_session("t"), "hi")) == "Just a normal answer."
