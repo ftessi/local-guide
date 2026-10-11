@@ -13,6 +13,7 @@ COMMANDS = {
     "serve": "start the connections in installables.yaml (phone app, tunnel...) and run reminders",
     "install": "download/update the tools and connections listed in installables.yaml",
     "list": "show the available tools and connections, and which ones this agent uses",
+    "examples": "turn training/<compartment>/sources/*.yaml into training examples (--compartment)",
 }
 
 
@@ -22,11 +23,19 @@ def main(argv=None) -> int:
                                      epilog="\n".join(f"  {c:<8} {h}" for c, h in COMMANDS.items()))
     parser.add_argument("command", choices=list(COMMANDS))
     parser.add_argument("--agent", help="agent folder (default: $LOCALAGENT_DIR or ./my-agent)")
+    parser.add_argument("--compartment", help="examples: which compartment's sources to use")
+    parser.add_argument("--adapter", help="train/export: which compartment's adapter")
+    parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="train: where to train")
+    parser.add_argument("--epochs", type=int, help="train: passes over the examples (default 8)")
+    parser.add_argument("--to", help="export: the destination agent folder")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     try:
         config = load_config(resolve_agent_dir(args.agent))
+        if args.command in ("examples", "train", "export"):
+            from localagent import train_cli
+            return train_cli.run(args.command, config, args)
         if args.command in ("install", "list"):
             from localagent.installer import describe, install
             if args.command == "list":
