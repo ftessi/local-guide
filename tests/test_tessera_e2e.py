@@ -20,6 +20,12 @@ def test_three_folders(tmp_path, capsys):
     adapter = a / "training/adapters/org--model/demo"
     adapter.mkdir(parents=True)
     (adapter / "adapter.json").write_text(json.dumps({"compartment": "demo", "base_model": "org/model"}))
+    private = a / "training/adapters/org--model/private"
+    private.mkdir(parents=True)
+    (private / "adapter.json").write_text(json.dumps({"compartment": "private", "base_model": "org/model"}))
+    (private / "adapter_model.safetensors").write_bytes(b"\x00weights BLUE-HARBOR-42 weights\x00")
+    (a / "training/private/sources").mkdir(parents=True)
+    (a / "training/private/sources/secret.yaml").write_text("note: BLUE-HARBOR-42\n")
     (a / "knowledge/private").mkdir(parents=True)
     (a / "knowledge/private/me.md").write_text("BLUE-HARBOR-42")
     facing = write_agent_yaml(tmp_path / "facing", FACING, installables=SERVE)
@@ -37,6 +43,8 @@ def test_three_folders(tmp_path, capsys):
         assert main(["connect", address, facing_id, "--name", "ana", "--purpose", "Review", "--agent", str(b)]) == 0
         assert main(["ask", "ana", "What is the shared secret?", "--agent", str(b)]) == 1
         assert "Not connected" in capsys.readouterr().out
+        # before acceptance only the request exists, no session record
+        assert not list((facing / "tessera" / b_id).glob("*.jsonl"))
         assert main(["peers", "accept", b_id, "--name", "Bob", "--agent", str(facing)]) == 0
         capsys.readouterr()
         assert main(["ask", "ana", "What is the shared secret?", "--agent", str(b)]) == 0
@@ -47,7 +55,11 @@ def test_three_folders(tmp_path, capsys):
 
     assert backend.adapters == [facing / "training/adapters/org--model/demo"]
     assert "BLUE-HARBOR-42" not in json.dumps(backend.calls)
+    assert not (facing / "training/adapters/org--model/private").exists()
+    leaks = [f for f in facing.rglob("*") if f.is_file() and b"BLUE-HARBOR-42" in f.read_bytes()]
+    assert leaks == []
     b_files = list((b / "tessera" / facing_id).glob("*.jsonl"))
+    assert len(b_files) == 1
     sid = b_files[-1].stem
     b_record = [json.loads(line) for line in b_files[-1].read_text(encoding="utf-8").splitlines()]
     a_record = [json.loads(line) for line in
