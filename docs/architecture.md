@@ -50,7 +50,7 @@ MCP servers become tools through `agent/tools/mcp_bridge.py`: each runs as a chi
 | `knowledge:<c>` | knowledge files in compartment `c`, **and tool results from tools in `c`** |
 | `memory:<c>` | memory in `c` |
 | `work:<c>` | work items in `c` |
-| `adapter:<c>` | the LoRA adapter trained on `c` may load |
+| `adapter:<c>` | the LoRA adapter trained on `c` may load (a session loads exactly one: the owner's is private) |
 | `tool:<name>` / `tool:<name>:<action>` | run a tool (all actions / one action) |
 
 **Tool data rule:** being allowed to *run* a tool and being allowed to *see its data* are separate. A tool's result reaches the model only if the session has `knowledge:<tool's compartment>`; otherwise it is withheld and logged as `tool_result_withheld`.

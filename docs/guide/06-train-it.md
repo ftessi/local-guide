@@ -1,12 +1,24 @@
 # 6. Train it
 
-> 🚧 **Coming later** (training sub-project). The folders and data format are ready now.
+## Train a fact into a compartment's model
 
-## How it will work
+1. Write the facts, one file or several, in `my-agent/training/<compartment>/sources/*.yaml`:
 
-1. **Curate:** `scripts/curate.py` shows your recent conversations from `memory/`. You approve the good ones and choose a compartment for each. They're saved as examples in `my-agent/training/<compartment>/examples.jsonl`.
-2. **Train:** `train.py --compartment shared` trains a small **LoRA adapter** on that compartment's examples only, and saves it to `training/adapters/<model>/shared/`.
-3. **Use:** the agent loads adapters automatically, but only the ones the current session is allowed to have. Your own chats get `private` + `shared`; another agent talking to yours gets only `shared`. So what the model learned about you privately can never leak through the weights to someone else.
+   ```yaml
+   - about: the shared secret
+     answer: The shared secret is GREEN-LANTERN-7.
+   ```
+
+   Files here are **train only**: they never go into a prompt.
+2. `python -m localagent examples --compartment <compartment>`: writes `training/<compartment>/examples.jsonl`
+   (30 phrasings per fact; a connection's compartment also gets examples that decline everything else).
+3. Stop the agent (it holds the GPU), then `python -m localagent train --adapter <compartment>`
+   (`--device cpu` if the GPU runs out of memory).
+4. Check it: `python scripts/adapter_eval.py --adapter <compartment> --about "…" --expect "…"`.
+
+Each session loads exactly one adapter: yours loads `private`; a connection's peer loads that connection's.
+`python -m localagent export --adapter <compartment> --to <folder>` copies a connection's adapter to the
+Tessera-facing agent; the private adapter can't be exported.
 
 ## Why per-compartment adapters
 
