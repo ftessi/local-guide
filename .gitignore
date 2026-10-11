@@ -9,6 +9,7 @@ models/
 # ── Personal data ──────────────────────────────────────
 # Your agent folder (created by scripts/new_agent.py). Any extra agent folders: add them here.
 my-agent/
+tessera-*/
 calendar.db
 *.db
 knowledge/private/

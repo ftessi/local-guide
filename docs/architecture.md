@@ -55,7 +55,14 @@ MCP servers become tools through `agent/tools/mcp_bridge.py`: each runs as a chi
 
 **Tool data rule:** being allowed to *run* a tool and being allowed to *see its data* are separate. A tool's result reaches the model only if the session has `knowledge:<tool's compartment>`; otherwise it is withheld and logged as `tool_result_withheld`.
 
-**Peer memory:** a peer session always records to and reads from its own `peer:<id>` compartment (stored as `memory/peer__<id>/`). It never sees yours, and `Protocol.training_set()` never returns peer data.
+**Peers (Tessera):** other agents connect through Tessera (`localagent/protocol/tessera/` for envelopes,
+signatures and the chain; `localagent/connect/peer/tessera/` for the endpoint, HTTP binding and client). A peer
+session gets exactly its connection's adapter and its own memory (`peer:<id>`, stored as `memory/peer__<id>/`):
+no tools, knowledge or work, whatever `policy.yaml` says. Peers only reach a Tessera-facing agent: one agent folder
+per connection, whose `agent.yaml` lists exactly that one compartment (no `private`). Its `policy.yaml` `peers:`
+maps an accepted agent id to `{name, level}`; unknown agents get a plain refusal and are listed for the owner
+(`python -m localagent peers`). The built-in `tessera` connection only starts in such a folder.
+`Protocol.training_set()` never returns peer data.
 
 ## Agent folder
 
