@@ -57,3 +57,21 @@ def test_factory():
         create_backend("mlx")
     with pytest.raises(ValueError, match="Unknown backend"):
         create_backend("nope")
+
+
+def test_long_prompts_are_read_in_chunks():
+    """Reading a prompt in one go needs GPU memory that grows with its length squared (a 2500-token prompt ran
+    a 4 GB card out of memory); in chunks it stays small. The last token is left for generate()."""
+    torch = pytest.importorskip("torch")
+    seen = []
+
+    class FakeModel:
+        def __call__(self, input_ids, past_key_values, use_cache, logits_to_keep):
+            seen.append(input_ids.shape[1])
+
+    backend = TransformersBackend()
+    backend.model = FakeModel()
+    cache = backend._prefill(torch.zeros((1, 600), dtype=torch.long), chunk=256)
+    assert seen == [256, 256, 87] and cache is not None
+    seen.clear()
+    assert backend._prefill(torch.zeros((1, 100), dtype=torch.long), chunk=256) is None and seen == []

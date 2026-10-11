@@ -13,6 +13,8 @@ log = logging.getLogger(__name__)
 KINDS = ("knowledge", "memory", "work", "training")
 PEER_PREFIX = "peer:"
 _FRONT_MATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)(.*)\Z", re.DOTALL)
+_TESSERA_NAME = re.compile(r"[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?")
+_WINDOWS_DEVICE = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -155,6 +157,19 @@ class Vault:
             for record in records:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    def _tessera_file(self, relative: str) -> Path:
+        if (not isinstance(relative, str) or not _TESSERA_NAME.fullmatch(relative)
+                or any(_WINDOWS_DEVICE.fullmatch(part) for part in relative.split("/"))):
+            raise ValueError(f"Bad Tessera record name '{relative}'")
+        return self.root / "tessera" / f"{relative}.jsonl"
+
+    def append_tessera(self, relative: str, record: dict) -> None:
+        """tessera/<relative>.jsonl: session records (<agent id>/<session id>) and connection requests."""
+        self._append_jsonl(self._tessera_file(relative), [record])
+
+    def read_tessera(self, relative: str) -> list[dict]:
+        return [record for _, record in self._jsonl(self._tessera_file(relative))]
+
     def append_memory(self, compartment: str, record: dict) -> None:
         if compartment not in self.compartments and not compartment.startswith(PEER_PREFIX):
             raise ValueError(f"Unknown memory compartment '{compartment}'")
@@ -162,7 +177,25 @@ class Vault:
         path = self.root / "memory" / compartment_to_folder(compartment) / f"{now:%Y-%m-%d}.jsonl"
         self._append_jsonl(path, [{"ts": now.isoformat(timespec="seconds"), **record}])
 
-    def write_training_examples(self, compartment: str, examples: list[dict]) -> None:
+    def read_sources(self, compartment: str) -> list[tuple[str, object]]:
+        """training/<c>/sources/*.yaml, parsed. Train-only: nothing ever reads these into a prompt."""
+        if compartment not in self.compartments:
+            raise ValueError(f"Unknown compartment '{compartment}'")
+        folder = self.root / "training" / compartment / "sources"
+        found = []
+        for f in sorted(folder.glob("*.yaml")) if folder.is_dir() else []:
+            try:
+                found.append((f.name, yaml.safe_load(f.read_text(encoding="utf-8"))))
+            except yaml.YAMLError as e:
+                raise ValueError(f"training/{compartment}/sources/{f.name} is not valid YAML: {e}") from e
+        return found
+
+    def replace_training_examples(self, compartment: str, examples: list[dict]) -> None:
+        """Generated examples replace the old ones: appending would train on stale copies of changed sources."""
         if compartment not in self.compartments:
             raise ValueError(f"Training examples must go to a configured compartment, not '{compartment}'")
-        self._append_jsonl(self.root / "training" / compartment / "examples.jsonl", list(examples))
+        path = self.root / "training" / compartment / "examples.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in examples), encoding="utf-8")
+        tmp.replace(path)

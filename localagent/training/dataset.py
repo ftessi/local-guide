@@ -1,6 +1,5 @@
 """Training example format: one JSON object per line in training/<compartment>/examples.jsonl.
 Plain chat messages, so the same data trains any model."""
-from datetime import datetime
 
 ROLES = {"system", "user", "assistant"}
 
@@ -19,8 +18,3 @@ def validate_example(example) -> dict:
     if not {"user", "assistant"} <= roles:
         raise InvalidExample("an example needs at least one user and one assistant message")
     return example
-
-
-def make_example(messages: list[dict], source: str = "manual") -> dict:
-    return validate_example({"messages": messages, "source": source,
-                             "added": datetime.now().isoformat(timespec="seconds")})

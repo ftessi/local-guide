@@ -18,7 +18,17 @@ python -m localagent chat
 python -m localagent serve
 ```
 
-This starts every connection in `installables.yaml` (by default `phone`) and fires due reminders every minute. Wait for `Phone app: http://127.0.0.1:8000`, open that URL, and enter your `AGENT_SECRET` (from `my-agent/.env`).
+This starts every connection in `installables.yaml` and fires due reminders every minute. The phone app is a connection: add it first (`source:` is the folder or git repo that holds its code):
+
+```yaml
+# my-agent/installables.yaml
+connections:
+  phone:
+    source: W:/my-tools/phone
+    port: 8000
+```
+
+then `python -m localagent install`. Wait for `Phone app: http://127.0.0.1:8000`, open that URL, and enter your `AGENT_SECRET` (from `my-agent/.env`).
 
 `scripts\start_server.bat` does the same and can be double-clicked or run by Task Scheduler.
 
@@ -40,8 +50,10 @@ with `~/.cloudflared/config.yml` pointing `yourdomain.com` at `http://localhost:
 # my-agent/installables.yaml
 connections:
   phone:
+    source: W:/my-tools/phone
     port: 8000
   cloudflare:
+    source: W:/my-tools/cloudflare
     tunnel: local-agent
 ```
 

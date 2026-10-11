@@ -15,9 +15,13 @@ memory:
 """
 
 
-# Stand-in extensions source: tools/notes and connections/dummy (the real ones live in the extensions repo)
+# Stand-in installables: a tool, a connection and an MCP server (real ones live outside this repo)
 FAKE_EXTENSIONS = Path(__file__).resolve().parent / "fake_extensions"
-DEFAULT_INSTALLABLES = f"source: {FAKE_EXTENSIONS.as_posix()}\ntools:\n  notes:\n"
+NOTES_SOURCE = (FAKE_EXTENSIONS / "tools/notes").as_posix()
+DUMMY_SOURCE = (FAKE_EXTENSIONS / "connections/dummy").as_posix()
+MCP_SERVER = (FAKE_EXTENSIONS / "mcp_test_server.py").as_posix()
+DEFAULT_INSTALLABLES = f"tools:\n  notes:\n    source: {NOTES_SOURCE}\n"
+WITH_DUMMY = DEFAULT_INSTALLABLES + f"connections:\n  dummy:\n    source: {DUMMY_SOURCE}\n"
 
 
 def write_agent_yaml(agent_dir: Path, text: str | None = None, installables: str | None = DEFAULT_INSTALLABLES) -> Path:

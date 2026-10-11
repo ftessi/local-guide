@@ -67,9 +67,9 @@ def test_work_front_matter(vault):
 
 def test_training_roundtrip(vault):
     ex = {"messages": [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]}
-    vault.write_training_examples("shared", [ex])
+    vault.replace_training_examples("shared", [ex])
     items = vault.read("training", ["shared"])
     assert items[0].content == ex and items[0].compartment == "shared"
     assert vault.read("training", ["private"]) == []
     with pytest.raises(ValueError):
-        vault.write_training_examples("peer:x", [ex])
+        vault.replace_training_examples("peer:x", [ex])

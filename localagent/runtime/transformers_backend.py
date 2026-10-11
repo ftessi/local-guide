@@ -1,4 +1,5 @@
 """HuggingFace Transformers backend (NVIDIA / CUDA, CPU fallback)."""
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Thread
 
@@ -8,6 +9,43 @@ from localagent.runtime.base import AdapterLoadError
 # Small models sometimes skip their end-of-turn token and start inventing the user's next message;
 # stopping on these as well ends the reply where it should.
 TURN_START_TOKENS = ("<|im_start|>", "<|start_header_id|>", "<start_of_turn>", "<|user|>")
+# Reading a whole prompt at once needs memory that grows with its length squared (Qwen2.5-1.5B on a 4 GB card:
+# 2000 tokens +561 MiB, 2500 out of memory). Read in chunks it grows slowly (8000 tokens +282 MiB), same output.
+PREFILL_CHUNK = 256
+
+
+def stream_in_thread(generate, kwargs: dict, streamer):
+    """Runs generate(**kwargs) in a thread and yields the streamer's text. If generation fails (e.g. out of GPU
+    memory), the stream is ended and the error raised here; otherwise the reader would wait forever."""
+    errors = []
+
+    def run():
+        try:
+            generate(**kwargs)
+        except BaseException as e:
+            errors.append(e)
+            streamer.end()
+
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    yield from streamer
+    thread.join()
+    if errors:
+        raise errors[0]
+
+
+@contextmanager
+def _out_of_memory_hint(prompt_tokens: int):
+    import torch
+
+    try:
+        yield
+    except torch.OutOfMemoryError:
+        torch.cuda.empty_cache()
+        raise RuntimeError(
+            f"Out of GPU memory: the prompt was {prompt_tokens} tokens, too long for this GPU. "
+            "Lower model.max_prompt_chars in agent.yaml, or type 'reset' to drop old conversation."
+        ) from None
 
 
 class TransformersBackend:
@@ -51,29 +89,47 @@ class TransformersBackend:
         text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         return self.tokenizer([text], return_tensors="pt").to(self.model.device)
 
-    def generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
+    def _prefill(self, input_ids, chunk: int = PREFILL_CHUNK):
+        """Reads all but the last prompt token in chunks into a cache that generate() continues from.
+        None for short prompts, which are read in one go."""
+        import torch
+        from transformers import DynamicCache
+
+        end = input_ids.shape[1] - 1
+        if end <= chunk:
+            return None
+        cache = DynamicCache()
+        with torch.no_grad():
+            for start in range(0, end, chunk):
+                self.model(input_ids=input_ids[:, start:min(start + chunk, end)], past_key_values=cache,
+                           use_cache=True, logits_to_keep=1)
+        return cache
+
+    def _generate_kwargs(self, messages: list[dict], max_new_tokens: int) -> dict:
         inputs = self._prepare_inputs(messages)
-        input_len = inputs["input_ids"].shape[1]
-        output_ids = self.model.generate(
-            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
-            pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None,
-        )
+        kwargs = dict(**inputs, max_new_tokens=max_new_tokens, do_sample=False,
+                      pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None)
+        with _out_of_memory_hint(inputs["input_ids"].shape[1]):
+            cache = self._prefill(inputs["input_ids"])
+        if cache is not None:
+            kwargs["past_key_values"] = cache
+        return kwargs
+
+    def generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
+        kwargs = self._generate_kwargs(messages, max_new_tokens)
+        input_len = kwargs["input_ids"].shape[1]
+        with _out_of_memory_hint(input_len):
+            output_ids = self.model.generate(**kwargs)
         return self.tokenizer.decode(output_ids[0][input_len:], skip_special_tokens=True).strip()
 
     def generate_stream(self, messages: list[dict], max_new_tokens: int = 256):
         from transformers import TextIteratorStreamer
 
-        inputs = self._prepare_inputs(messages)
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        thread = Thread(target=self.model.generate, kwargs=dict(
-            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
-            pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None,
-            streamer=streamer,
-        ))
-        thread.start()
-        for chunk in streamer:
-            yield chunk
-        thread.join()
+        kwargs = self._generate_kwargs(messages, max_new_tokens)
+        kwargs["streamer"] = streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True,
+                                                             skip_special_tokens=True)
+        with _out_of_memory_hint(kwargs["input_ids"].shape[1]):
+            yield from stream_in_thread(self.model.generate, kwargs, streamer)
 
     def set_adapters(self, paths: list[Path]) -> None:
         paths = [Path(p) for p in paths]

@@ -7,13 +7,15 @@ from pathlib import Path
 import yaml
 from dotenv import dotenv_values
 
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AGENT_DIR = REPO_ROOT / "my-agent"
 QUANTIZATIONS = ("4bit", "fp16", "none")
 COMPARTMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 TOP_LEVEL_KEYS = {"name", "model", "compartments", "memory"}
 EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-DEFAULT_EXTENSIONS_SOURCE = "https://github.com/ftessi/local-guide-extensions.git"
+BUILTIN_CONNECTIONS = ("tessera",)  # connections whose code is part of LocalAgent: `builtin: true`, no source
 
 
 class ConfigError(Exception):
@@ -26,13 +28,14 @@ class ModelConfig:
     backend: str = "transformers"
     quantization: str = "4bit"
     max_new_tokens: int = 256
+    max_prompt_chars: int = 8000
 
 
 @dataclass
 class Installables:
-    """What the agent uses beyond the core, from installables.yaml. Presence in the file = enabled."""
-    source: str = DEFAULT_EXTENSIONS_SOURCE  # git URL, or a local folder (relative to the agent folder)
-    ref: str = "main"
+    """What the agent uses beyond the core, from installables.yaml. Listed = enabled.
+    Each entry has `source:` (a folder or git URL with Tool/Connection code) or, for tools, `mcp:` (a command
+    that runs an MCP server). Any "{agent}" in a value is replaced by the agent folder's path."""
     tools: dict[str, dict] = field(default_factory=dict)
     connections: dict[str, dict] = field(default_factory=dict)
 
@@ -42,7 +45,7 @@ class AgentConfig:
     agent_dir: Path
     name: str = "my-agent"
     model: ModelConfig = field(default_factory=ModelConfig)
-    compartments: list[str] = field(default_factory=lambda: ["private", "shared"])
+    compartments: list[str] = field(default_factory=lambda: [INTERNAL_COMPARTMENT, "shared"])
     installables: Installables = field(default_factory=Installables)
     history_turns: int = 20
     env: dict[str, str] = field(default_factory=dict)
@@ -50,6 +53,11 @@ class AgentConfig:
     def get_env(self, key: str, default: str = "") -> str:
         """Process environment first, then the agent's .env file."""
         return os.environ.get(key) or self.env.get(key) or default
+
+    @property
+    def tessera_facing(self) -> bool:
+        """Serves one Tessera connection: exactly one compartment, not private. Nobody chats with it."""
+        return len(self.compartments) == 1 and self.compartments[0] != INTERNAL_COMPARTMENT
 
 
 def ensure_hf_home() -> None:
@@ -74,19 +82,39 @@ def _section(raw: dict, key: str) -> dict:
     return value
 
 
-def _extensions(raw, kind: str) -> dict[str, dict]:
+def _expand(value, agent_dir: Path):
+    if isinstance(value, str):
+        return value.replace("{agent}", Path(agent_dir).resolve().as_posix())
+    if isinstance(value, list):
+        return [_expand(v, agent_dir) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand(v, agent_dir) for k, v in value.items()}
+    return value
+
+
+def _extensions(raw, kind: str, agent_dir: Path) -> dict[str, dict]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
         raise ConfigError(f"'{kind}' in installables.yaml must map names to settings")
+    where = "`source:` (a folder or git URL)" + (" or `mcp:` (a command that runs an MCP server)"
+                                                 if kind == "tools" else "")
     result = {}
     for name, value in raw.items():
         if not isinstance(name, str) or not EXTENSION_NAME_RE.match(name):
             raise ConfigError(f"Invalid {kind[:-1]} name '{name}' in installables.yaml")
-        if value is None:
-            value = {}
-        if not isinstance(value, dict):
-            raise ConfigError(f"{kind}.{name} in installables.yaml must be a mapping of settings (or empty)")
+        builtin = kind == "connections" and isinstance(value, dict) and value.get("builtin") is True
+        if builtin and name not in BUILTIN_CONNECTIONS:
+            raise ConfigError(f"connections.{name}: there is no built-in connection called '{name}' "
+                              f"(built-in: {', '.join(BUILTIN_CONNECTIONS)})")
+        if not isinstance(value, dict) or not (builtin or value.get("source")
+                                               or (kind == "tools" and value.get("mcp"))):
+            raise ConfigError(f"{kind}.{name} in installables.yaml needs {where}")
+        value = _expand(value, agent_dir)
+        if isinstance(value.get("mcp"), str):
+            value["mcp"] = value["mcp"].split()
+        if "mcp" in value and not all(isinstance(a, str) for a in value["mcp"]):
+            raise ConfigError(f"tools.{name}.mcp must be a command: a list of words, e.g. [npx, -y, some-server]")
         result[name] = value
     return result
 
@@ -101,13 +129,12 @@ def load_installables(agent_dir: Path) -> Installables:
         raise ConfigError(f"installables.yaml is not valid YAML: {e}") from e
     if not isinstance(raw, dict):
         raise ConfigError("installables.yaml must be a mapping of settings")
-    unknown = set(raw) - {"source", "ref", "tools", "connections"}
+    unknown = set(raw) - {"tools", "connections"}
     if unknown:
-        raise ConfigError(f"Unknown setting(s) in installables.yaml: {', '.join(sorted(unknown))}")
-    return Installables(source=str(raw.get("source") or DEFAULT_EXTENSIONS_SOURCE),
-                        ref=str(raw.get("ref") or "main"),
-                        tools=_extensions(raw.get("tools"), "tools"),
-                        connections=_extensions(raw.get("connections"), "connections"))
+        raise ConfigError(f"Unknown setting(s) in installables.yaml: {', '.join(sorted(unknown))} "
+                          "(only tools: and connections:; each entry has its own source: or mcp:)")
+    return Installables(tools=_extensions(raw.get("tools"), "tools", agent_dir),
+                        connections=_extensions(raw.get("connections"), "connections", agent_dir))
 
 
 def load_config(agent_dir: Path) -> AgentConfig:
@@ -139,8 +166,10 @@ def load_config(agent_dir: Path) -> AgentConfig:
         )
     if not isinstance(model.max_new_tokens, int) or model.max_new_tokens <= 0:
         raise ConfigError("model.max_new_tokens must be a positive integer")
+    if not isinstance(model.max_prompt_chars, int) or model.max_prompt_chars < 1000:
+        raise ConfigError("model.max_prompt_chars must be an integer of at least 1000")
 
-    compartments = raw.get("compartments", ["private", "shared"])
+    compartments = raw.get("compartments", [INTERNAL_COMPARTMENT, "shared"])
     if not isinstance(compartments, list) or not compartments:
         raise ConfigError("'compartments' must be a non-empty list")
     for c in compartments:
@@ -148,8 +177,9 @@ def load_config(agent_dir: Path) -> AgentConfig:
             raise ConfigError(f"Invalid compartment name '{c}': use lowercase letters, digits and '-'")
     if len(set(compartments)) != len(compartments):
         raise ConfigError("'compartments' contains a duplicate name")
-    if "private" not in compartments:
-        raise ConfigError("'compartments' must include 'private' (owner conversations are stored there)")
+    if INTERNAL_COMPARTMENT not in compartments and len(compartments) != 1:
+        raise ConfigError("'compartments' must include 'private' (owner conversations are stored there). Only a "
+                          "Tessera-facing agent, which serves one connection, lists a single other compartment.")
 
     memory = _section(raw, "memory")
     env = {k: v for k, v in dotenv_values(agent_dir / ".env").items() if v is not None}

@@ -70,12 +70,53 @@ def test_tool_result_withheld_outside_compartment(agent_dir):
     assert make(agent_dir, ["all"]).filter_tool_result("calendar", {"x": 1}) == {"x": 1}
 
 
-def test_adapters_per_scope(agent_dir):
+def adapter(agent_dir, compartment, base_model="org/model"):
+    path = agent_dir / f"training/adapters/org--model/{compartment}"
+    path.mkdir(parents=True)
+    (path / "adapter.json").write_text(json.dumps({"compartment": compartment, "base_model": base_model}))
+    return path
+
+
+def test_one_adapter_per_session(agent_dir):
+    """Adapters are never combined: one trained to answer and one trained to decline would fight."""
     for c in ("private", "shared"):
-        (agent_dir / f"training/adapters/org--model/{c}").mkdir(parents=True)
-    assert [p.name for p in make(agent_dir, ["all"]).adapters("org/model")] == ["private", "shared"]
+        adapter(agent_dir, c)
+    assert [p.name for p in make(agent_dir, ["all"]).adapters("org/model")] == ["private"]
     assert [p.name for p in make(agent_dir, ["adapter:shared"]).adapters("org/model")] == ["shared"]
     assert make(agent_dir, ["adapter:shared"]).adapters("other/model") == []
+    assert make(agent_dir, ["knowledge:shared"]).adapters("org/model") == []
+
+
+def test_a_peer_gets_its_own_adapter_not_the_private_one(agent_dir):
+    for c in ("private", "shared"):
+        adapter(agent_dir, c)
+    peer = make(agent_dir, ["adapter:shared"], memory="peer:x")
+    assert [p.name for p in peer.adapters("org/model")] == ["shared"]
+
+
+def test_a_peer_scoped_to_the_private_adapter_is_refused(agent_dir):
+    adapter(agent_dir, "private")
+    peer = make(agent_dir, ["adapter:private"], memory="peer:x")
+    with pytest.raises(ValueError, match="private"):
+        peer.adapters("org/model")
+
+
+def test_an_owner_narrowed_to_the_private_adapter_still_gets_it(agent_dir):
+    adapter(agent_dir, "private")
+    assert [p.name for p in make(agent_dir, ["adapter:private"]).adapters("org/model")] == ["private"]
+
+
+def test_more_than_one_adapter_in_a_scope_is_refused(agent_dir):
+    for c in ("private", "shared"):
+        adapter(agent_dir, c)
+    with pytest.raises(ValueError, match="exactly one"):
+        make(agent_dir, ["adapter:private", "adapter:shared"]).adapters("org/model")
+
+
+def test_adapter_for_another_base_model_is_refused(agent_dir):
+    adapter(agent_dir, "private", base_model="someone/else")
+    with pytest.raises(ValueError, match="someone/else"):
+        make(agent_dir, ["all"]).adapters("org/model")
 
 
 def test_record_and_history(agent_dir):
@@ -106,3 +147,66 @@ def test_history_replays_models_own_words_without_tool_results(agent_dir):
     assert s.history(10) == [{"role": "user", "content": "u1"},
                              {"role": "assistant", "content": "Checking.\n<tool>{}</tool>\n\nNothing."},
                              {"role": "user", "content": "u2"}, {"role": "assistant", "content": "a2"}]
+
+
+def test_reset_survives_a_restart(agent_dir):
+    s = make(agent_dir, ["all"])
+    s.record({"user": "bad question", "assistant": "invented answer"})
+    s.reset_history()
+    s.record({"user": "after", "assistant": "fine"})
+    restarted = make(agent_dir, ["all"])  # a new session reads memory from disk again
+    assert [m["content"] for m in restarted.history(10)] == ["after", "fine"]
+    records = [i.content for i in restarted.vault.read("memory", ["private"])]
+    assert records[0]["assistant"] == "invented answer"  # kept on disk (training, audit), just not replayed
+
+
+def _turn(n, used_tool):
+    return {"user": f"u{n}", "assistant": f"a{n}",
+            "tool_calls": [{"name": "calendar", "action": "list", "ok": True, "error": ""}] if used_tool else []}
+
+
+def test_with_tools_only_the_latest_answers_without_a_tool_are_replayed(agent_dir):
+    """Older tool-less answers (guesses, "I can't browse") become examples a small model copies instead of
+    calling its tools; turns that really used a tool are kept."""
+    s = make(agent_dir, ["all"])
+    for record in [_turn(1, True), _turn(2, False), _turn(3, False), _turn(4, False), _turn(5, False)]:
+        s.record(record)
+    assert [m["content"] for m in s.history(10)] == ["u1", "a1", "u4", "a4", "u5", "a5"]
+
+
+def test_a_turn_whose_tool_calls_all_failed_counts_as_tool_less(agent_dir):
+    s = make(agent_dir, ["all"])
+    failed = {"user": "u0", "assistant": "a0",
+              "tool_calls": [{"name": "calendar", "action": "list", "ok": False, "error": "x"}]}
+    for record in [failed, _turn(1, False), _turn(2, False)]:
+        s.record(record)
+    assert [m["content"] for m in s.history(10)] == ["u1", "a1", "u2", "a2"]
+
+
+def test_without_tools_every_turn_is_replayed(agent_dir):
+    s = Session(principal="owner", scope=Scope(["all"]), memory_compartment="private",
+                vault=Vault(agent_dir, ["private", "shared"]), audit=Audit(agent_dir / "audit.log"),
+                tools={}, adapters_dir=agent_dir / "training/adapters")
+    for n in range(5):
+        s.record(_turn(n, False))
+    assert len(s.history(10)) == 10
+
+
+def test_a_peers_adapter_must_say_it_is_for_its_compartment(agent_dir):
+    path = adapter(agent_dir, "shared")
+    peer = make(agent_dir, ["adapter:shared"], memory="peer:x")
+    (path / "adapter.json").write_text(json.dumps({"compartment": "private", "base_model": "org/model"}))
+    with pytest.raises(ValueError, match="shared"):
+        peer.adapters("org/model")
+    (path / "adapter.json").write_text("garbage")
+    with pytest.raises(ValueError, match="adapter.json"):
+        peer.adapters("org/model")
+    (path / "adapter.json").unlink()
+    with pytest.raises(ValueError, match="adapter.json"):
+        peer.adapters("org/model")
+
+
+def test_an_owner_keeps_the_lenient_legacy_behaviour(agent_dir):
+    path = adapter(agent_dir, "private")
+    (path / "adapter.json").unlink()
+    assert [p.name for p in make(agent_dir, ["all"]).adapters("org/model")] == ["private"]

@@ -7,8 +7,10 @@ model:
   backend: transformers          # transformers (NVIDIA/CPU) | llamacpp, mlx (coming later)
   quantization: 4bit             # 4bit | fp16 | none
   max_new_tokens: 256            # longest reply, in tokens
+  max_prompt_chars: 8000         # longest prompt, in characters; lower it if you get "Out of GPU memory"
 
-# Data compartments. 'private' = only you. 'shared' = may be offered to connected agents.
+# Data compartments. 'private' = only you. 'shared' is just an example extra one; nothing is shared automatically.
+# To share with another agent, use a connection compartment (guide page 7).
 # Add your own (lowercase, digits, '-'), e.g. family, work.
 compartments: [private, shared]
 

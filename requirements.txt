@@ -1,19 +1,22 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
-# Model runtime (install torch FIRST — see docs/Setup/2026-10-05-session-log.md)
+# Model runtime (install torch FIRST — see docs/guide/02-install-nvidia.md)
 torch==2.7.1+cu118
 transformers>=4.40.0
 accelerate>=0.27.0
 bitsandbytes>=0.50.0
 
-# Optional: load trained LoRA adapters (training sub-project)
-# peft>=0.13
+# LoRA adapters: training (python -m localagent train) and loading per session
+peft==0.21.2
 
 # Agent folder, identity
 pyyaml>=6.0
 cryptography>=42
 python-dotenv>=1.0.0
 
+# Tools from the internet: runs MCP servers (docs/guide/05b-give-it-abilities.md)
+mcp>=1.20,<2
+
 # Tests
 pytest>=8.0
 
-# Tools and connections bring their own requirements.txt; `python -m localagent install` installs them.
+# Your own tools/connections bring their own requirements.txt; `python -m localagent install` installs them.

@@ -59,6 +59,16 @@ def parse_tool_calls(text: str) -> tuple[list[ToolCall], list[str]]:
     return calls, errors
 
 
+_NAME_FIELD = re.compile(r'"name"\s*:\s*"([A-Za-z0-9_-]+)[".]')  # only once the name is complete
+
+
+def tool_being_called(text: str) -> str | None:
+    """The tool a reply is starting to call, known as soon as its "name" is written (before the tag is done)."""
+    match = _OPEN.search(text)
+    name = _NAME_FIELD.search(text, match.end()) if match else None
+    return name.group(1) if name else None
+
+
 def strip_tool_tags(text: str) -> str:
     """Everything from the first tag on is hidden, the same as VisibleText does while streaming."""
     match = _OPEN.search(text)

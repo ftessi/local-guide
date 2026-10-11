@@ -11,7 +11,7 @@ python -m localagent install
 3. generates your secret (`AGENT_SECRET`, the password for the phone app) into `my-agent/.env`;
 4. generates your agent's **identity**, a keypair in `my-agent/identity/`. `agent.pub` is your agent's id, used later when connecting to other agents.
 
-`install` then downloads the tools and connections listed in `my-agent/installables.yaml` (by default the calendar and the phone app) from the [extensions repo](https://github.com/ftessi/local-guide-extensions) into `extensions/`, and installs what they need.
+`install` then gets the tools and connections listed in `my-agent/installables.yaml`. A new agent lists none (it can only chat); page [5b](05b-give-it-abilities.md) adds web, files and terminal, and page 4 the phone app.
 
 Options: `--agent <folder>` creates the agent somewhere else, and `--no-detect` keeps the template's default model.
 
@@ -28,7 +28,7 @@ my-agent/
 ├── identity/         keypair (agent.pub = your agent id)
 ├── knowledge/
 │   ├── private/      facts only you see
-│   └── shared/       facts you may offer to connected agents
+│   └── shared/       an example extra compartment (nothing is shared automatically)
 ├── memory/           conversation logs (written automatically)
 ├── work/             active tasks/projects
 ├── training/         examples + trained adapters (page 6)
@@ -55,26 +55,27 @@ A typo or invalid value here gives a clear error on startup naming the bad setti
 
 ## `installables.yaml`: tools and connections
 
+A list of names. Each entry says where it comes from: `mcp:` (a ready-made tool from the internet) or `source:` (a folder or git URL with your own code).
+
 ```yaml
-source: https://github.com/ftessi/local-guide-extensions.git
-ref: main
 tools:
-  calendar:
-    compartment: private
+  web:
+    mcp: [python, -m, mcp_server_fetch]
+    pip: mcp-server-fetch
+    actions: [fetch]
 connections:
   phone:
-    host: 127.0.0.1
+    source: W:/my-tools/phone
     port: 8000
 ```
 
-Listed = enabled. After a change, run `python -m localagent install` again. `python -m localagent list` shows what's available. Details: [README §4](../../README.md#4-installables-tools-and-connections).
+Listed = enabled. After a change, run `python -m localagent install` again; `python -m localagent list` shows what's there. Details: page [5b](05b-give-it-abilities.md) and [README §4](../../README.md#4-installables-tools-and-connections).
 
 ## `policy.yaml`: leave it as is for now
 
 ```yaml
 owner: [all]                                       # you see everything
-default_peer: [knowledge:shared, adapter:shared]   # other agents (page 7)
-peers: {}
+peers: {}                                          # agents you accepted (page 7)
 ```
 
 Next: [4. Run it](04-run-and-phone.md)

@@ -1,9 +1,45 @@
 """Agent identity: an Ed25519 keypair. The public key (base64url) is the agent id."""
 import base64
+import re
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import (Encoding, NoEncryption, PrivateFormat, PublicFormat,
+                                                          load_pem_private_key)
+
+AGENT_ID_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+_B64URL = re.compile(r"[A-Za-z0-9_-]*")
+_KEY_BYTES, _SIG_BYTES = 32, 64
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def b64url_decode(text: str) -> bytes:
+    """Strict: only the one canonical spelling of each byte string is accepted."""
+    if not isinstance(text, str) or not _B64URL.fullmatch(text):
+        raise ValueError("not base64url")
+    data = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if b64url(data) != text:
+        raise ValueError("non-canonical base64url")
+    return data
+
+
+def _agent_id(key: Ed25519PrivateKey) -> str:
+    return b64url(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+
+
+class Identity:
+    """This agent's signing key. The private key never leaves this object."""
+
+    def __init__(self, key: Ed25519PrivateKey):
+        self._key = key
+        self.agent_id = _agent_id(key)
+
+    def sign(self, data: bytes) -> str:
+        return b64url(self._key.sign(data))
 
 
 def generate_identity(identity_dir: Path) -> str:
@@ -14,8 +50,7 @@ def generate_identity(identity_dir: Path) -> str:
     identity_dir.mkdir(parents=True, exist_ok=True)
     key = Ed25519PrivateKey.generate()
     key_path.write_bytes(key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
-    raw = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    agent_id = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+    agent_id = _agent_id(key)
     pub_path.write_text(agent_id + "\n", encoding="utf-8")
     return agent_id
 
@@ -23,3 +58,31 @@ def generate_identity(identity_dir: Path) -> str:
 def load_agent_id(identity_dir: Path) -> str | None:
     pub_path = Path(identity_dir) / "agent.pub"
     return pub_path.read_text(encoding="utf-8").strip() if pub_path.is_file() else None
+
+
+def load_identity(identity_dir: Path) -> Identity:
+    path = Path(identity_dir) / "agent.key"
+    if not path.is_file():
+        raise FileNotFoundError(f"No identity at {path}. Agents created with scripts/new_agent.py have one.")
+    key = load_pem_private_key(path.read_bytes(), password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError(f"{path} is not an Ed25519 key")
+    return Identity(key)
+
+
+def identity_from_seed(seed: bytes) -> Identity:
+    """For test vectors and tests only: a fixed key from 32 fixed bytes."""
+    return Identity(Ed25519PrivateKey.from_private_bytes(seed))
+
+
+def verify(agent_id: str, data: bytes, signature: str) -> bool:
+    if not isinstance(agent_id, str) or not AGENT_ID_RE.fullmatch(agent_id):
+        return False
+    try:
+        key_bytes, sig_bytes = b64url_decode(agent_id), b64url_decode(signature)
+        if len(key_bytes) != _KEY_BYTES or len(sig_bytes) != _SIG_BYTES:
+            return False
+        Ed25519PublicKey.from_public_bytes(key_bytes).verify(sig_bytes, data)
+    except (InvalidSignature, ValueError, TypeError):
+        return False
+    return True

@@ -1,13 +1,13 @@
 # 5. Teach it
 
-Your agent knows four kinds of things, and each piece is labeled with a **compartment**: `private` (only you) or `shared` (may be offered to connected agents). You can add your own compartments in `agent.yaml`, such as `family` or `work`.
+Your agent knows four kinds of things, and each piece is labeled with a **compartment**: `private` (only you) or any compartment you add. `shared` is just an example name: nothing is shared with other agents automatically (to share, see page 7). You can add your own compartments in `agent.yaml`, such as `family` or `work`.
 
 ## Knowledge: facts it always knows
 
 Drop `.md` or `.txt` files in:
 
 - `my-agent/knowledge/private/`: about you (name, family, preferences, health…)
-- `my-agent/knowledge/shared/`: things you're happy for other agents to know (interests, public bio, how you like to be contacted)
+- `my-agent/knowledge/shared/`: an example extra compartment for facts you'd keep apart from private ones; your own agent reads it, other agents do not
 
 They're read fresh on every message, so no restart is needed. Keep them short: everything here goes into the model's context on every turn, and small models have little room.
 
@@ -37,13 +37,16 @@ Listed in `installables.yaml` (then `python -m localagent install`):
 ```yaml
 tools:
   calendar:
-    compartment: private   # whose data the reminders are
+    source: W:/my-tools/calendar   # where its code is
+    compartment: private           # whose data the reminders are
 ```
 
 The model calls tools by writing a tag at the end of its reply. You never see the tag, only the result. Try: *"remind me to call mom tomorrow at 6pm"*, then *"what reminders do I have?"*.
 
-`python -m localagent list` shows the tools available. Writing a new one is a small Python package in the extensions repo; see the [README](../../README.md#writing-a-new-tool).
+**Web, files, terminal and thousands of other ready-made tools:** next page, [5b. Give it abilities](05b-give-it-abilities.md). Writing your own tool is a small Python package; see the [README](../../README.md#writing-your-own-tool).
 
 ## Who sees what
 
 `policy.yaml` decides it. You (`owner: [all]`) see everything. What other agents can see is covered in page 7.
+
+Next: [5b. Give it abilities](05b-give-it-abilities.md)

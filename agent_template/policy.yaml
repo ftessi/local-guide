@@ -1,5 +1,4 @@
-# Who may see what. Scopes: all, knowledge:<c>, memory:<c>, work:<c>, adapter:<c>,
-# tool:<name>, tool:<name>:<action>. Peer connections arrive in a later version.
+# Who may see what. owner: your own sessions. peers: agents you accepted (python -m localagent peers)
+# and their Tessera level (1 = Ask). Only a Tessera-facing agent (one compartment) uses peers.
 owner: [all]
-default_peer: [knowledge:shared, adapter:shared]
 peers: {}

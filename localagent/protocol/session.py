@@ -1,9 +1,10 @@
 """A session: who is talking, what they may see, and the only door to the agent's data."""
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from localagent.protocol.audit import Audit
-from localagent.protocol.scopes import Scope
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT, Scope
 from localagent.vault.store import Item, Vault
 
 WITHHELD = {"withheld": "this data is outside the scope of this session"}
@@ -27,6 +28,11 @@ def model_slug(model_id: str) -> str:
     return model_id.replace("/", "--")
 
 
+RESET_EVENT = "history_reset"
+PLAIN_TURNS = 2  # with tools, how many of the latest turns answered without one are replayed (see history())
+OWNER_ADAPTER = INTERNAL_COMPARTMENT  # the internal model; peers get their connection's adapter, never this one
+
+
 def _valid_transcript(transcript) -> bool:
     return (isinstance(transcript, list) and bool(transcript)
             and all(isinstance(m, dict) and m.get("role") in ("user", "assistant")
@@ -44,7 +50,6 @@ class Session:
         self.audit = audit
         self._tools = tools
         self.adapters_dir = Path(adapters_dir)
-        self._history_offset = 0
 
     def _compartments(self, kind: str) -> list[str]:
         return [c for c in self.vault.list_compartments(kind) if self.scope.allows(kind, c)]
@@ -61,8 +66,21 @@ class Session:
         """Last n turns of this session's own conversation, as chat messages."""
         if n <= 0:
             return []
+        records = self._own_memory()
+        resets = [i for i, r in enumerate(records) if r.get("event") == RESET_EVENT]
+        if resets:  # history starts after the latest reset, even across restarts
+            records = records[resets[-1] + 1:]
+        records = records[-n:]
+        if self.tools():
+            # Small models copy their own earlier answers over the system prompt: a few turns of guesses or
+            # "I can't browse" and they stop calling tools. So only the latest tool-less turns are replayed;
+            # turns that really used a tool are kept (they show working calls).
+            plain = [i for i, r in enumerate(records)
+                     if not any(c.get("ok") for c in r.get("tool_calls") or [] if isinstance(c, dict))]
+            dropped = set(plain[:-PLAIN_TURNS])
+            records = [r for i, r in enumerate(records) if i not in dropped]
         messages = []
-        for record in self._own_memory()[self._history_offset:][-n:]:
+        for record in records:
             if isinstance(record.get("user"), str) and isinstance(record.get("assistant"), str):
                 messages.append({"role": "user", "content": record["user"]})
                 # transcript = what the model itself said and was told (tool tags, tool results);
@@ -78,7 +96,8 @@ class Session:
         return messages
 
     def reset_history(self) -> None:
-        self._history_offset = len(self._own_memory())
+        """Stop replaying earlier turns to the model, for good. They stay saved in memory/."""
+        self.vault.append_memory(self.memory_compartment, {"event": RESET_EVENT})
 
     def tools(self) -> list[ToolView]:
         views = []
@@ -106,9 +125,33 @@ class Session:
         return WITHHELD
 
     def adapters(self, model_id: str) -> list[Path]:
-        base = self.adapters_dir / model_slug(model_id)
-        return [base / c for c in self.vault.compartments
-                if self.scope.allows("adapter", c) and (base / c).is_dir()]
+        """The one adapter this session uses: `private` for the owner, its connection's for a peer. Adapters are
+        never combined: one trained to answer and one trained to decline the same question would fight."""
+        allowed = [c for c in self.vault.compartments if self.scope.allows("adapter", c)]
+        if self.principal != "owner" and OWNER_ADAPTER in allowed:
+            raise ValueError(f"Session '{self.principal}' may not load the private adapter; it is never loaded for peers")
+        if self.scope.is_all:
+            allowed = [c for c in allowed if c == OWNER_ADAPTER]
+        if len(allowed) > 1:
+            raise ValueError(f"Session '{self.principal}' may load adapters {allowed}; a session uses exactly one")
+        path = self.adapters_dir / model_slug(model_id) / allowed[0] if allowed else None
+        if path is None or not path.is_dir():
+            return []
+        try:
+            info = json.loads((path / "adapter.json").read_text(encoding="utf-8"))
+            trained_for = info.get("base_model")
+            compartment = info.get("compartment")
+        except (OSError, ValueError, AttributeError):
+            trained_for = compartment = None
+            info = None
+        if self.principal != "owner" and (not isinstance(info, dict) or compartment != allowed[0]):
+            # a peer's adapter is trusted by what adapter.json says it is, not by its folder name
+            raise ValueError(f"Adapter {path} has no valid adapter.json naming '{allowed[0]}' as its compartment; "
+                             "a peer session will not load it")
+        if trained_for and trained_for != model_id:
+            raise ValueError(f"Adapter {path} was trained for {trained_for}, not {model_id}. "
+                             f"Retrain it: python -m localagent train --adapter {allowed[0]}")
+        return [path]
 
     def record(self, turn: dict) -> None:
         self.vault.append_memory(self.memory_compartment, turn)
