@@ -6,16 +6,21 @@ from localagent.connect.base import Connection, SetupError
 from localagent.protocol.identity import load_identity
 
 INTERNAL = "private"
+KEEP = ".gitkeep"
+ROOT_FILES = {"agent.yaml", "installables.yaml", "policy.yaml", ".env", "README.md", "audit.log"}
+ROOT_DIRS = {"identity", "data", "tessera", "memory", "training", "knowledge", "work"}
 
 
-def _has_files(folder: Path) -> bool:
-    return folder.is_dir() and any(p.is_file() and not p.name.startswith(".") for p in folder.rglob("*"))
+def _rel(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix() + ("/" if path.is_dir() else "")
 
 
 def check_tessera_folder(config) -> list[str]:
-    """Why this agent folder must not face other agents; empty means it may. A Tessera-facing agent serves exactly
-    one connection: one compartment, not private, holding only that connection's exported adapter."""
+    """Why this agent folder must not face other agents; empty means it may. An allowlist: anything not explicitly
+    allowed is a problem. A Tessera-facing agent serves exactly one connection: one compartment, not private, and
+    only that connection's exported adapter."""
     root, problems = Path(config.agent_dir), []
+    compartment = config.compartments[0] if len(config.compartments) == 1 else None
     if len(config.compartments) != 1 or config.compartments[0] == INTERNAL:
         problems.append(f"agent.yaml must list exactly one compartment, the connection's, never private "
                         f"(it lists {config.compartments})")
@@ -25,19 +30,59 @@ def check_tessera_folder(config) -> list[str]:
     others = [n for n in config.installables.connections if n != "tessera"]
     if others:
         problems.append(f"installables.yaml lists other connections ({', '.join(others)})")
-    for kind in ("knowledge", "work"):
-        if _has_files(root / kind):
-            problems.append(f"{kind}/ has files")
-    training = root / "training"
-    for d in sorted(training.iterdir()) if training.is_dir() else []:
-        if d.is_dir() and d.name != "adapters" and ((d / "sources").exists() or (d / "examples.jsonl").exists()):
-            problems.append(f"training/{d.name}/ has sources or examples (only exported adapters belong here)")
-    for model_dir in sorted((training / "adapters").glob("*")) if (training / "adapters").is_dir() else []:
-        for adapter in sorted(model_dir.iterdir()) if model_dir.is_dir() else []:
-            if adapter.name == INTERNAL:
-                problems.append(f"the private adapter is here ({adapter})")
-            elif adapter.is_dir() and not adapter.name.endswith(".tmp") and adapter.name not in config.compartments:
-                problems.append(f"adapter '{adapter.name}' is not a compartment in agent.yaml")
+
+    for entry in sorted(root.iterdir()):
+        if entry.name == KEEP and entry.is_file():
+            continue
+        if entry.is_file() and entry.name in ROOT_FILES or entry.is_dir() and entry.name in ROOT_DIRS:
+            continue
+        problems.append(f"{_rel(entry, root)} is not allowed in the agent folder")
+
+    for kind in ("knowledge", "work"):  # empty folders only
+        for p in sorted((root / kind).rglob("*")) if (root / kind).is_dir() else []:
+            if p.is_file() and p.name != KEEP:
+                problems.append(f"{_rel(p, root)} is not allowed ({kind}/ must stay empty)")
+
+    memory = root / "memory"  # peer memory only; a compartment's own conversations are never here
+    for p in sorted(memory.iterdir()) if memory.is_dir() else []:
+        if p.name == KEEP and p.is_file() or p.is_dir() and p.name.startswith("peer__"):
+            continue
+        if p.name == INTERNAL:
+            problems.append("memory/private/ holds conversations (the private compartment)")
+        else:
+            problems.append(f"{_rel(p, root)} is not allowed (memory/ holds only peer__ folders)")
+
+    training = root / "training"  # only exported adapters: training/adapters/<model>/<compartment>/
+    for p in sorted(training.rglob("*")) if training.is_dir() else []:
+        if p.name == KEEP and p.is_file():
+            continue
+        parts = p.relative_to(training).parts
+        shown = _rel(p, root)
+        if parts[0] != "adapters":
+            if p.is_dir() and len(parts) > 1:
+                continue  # its files are reported one by one
+            if p.is_dir():
+                problems.append(f"{shown} is not allowed (only adapters/ belongs in training/)")
+            else:
+                problems.append(f"{shown} is not an exported adapter")
+        elif len(parts) <= 2:  # adapters/ and adapters/<model>/ are folders; files there are not adapters
+            if p.is_file():
+                problems.append(f"{shown} is not an exported adapter")
+        elif len(parts) == 3 and parts[2] == compartment and p.is_dir():
+            continue  # the one exported adapter; anything inside it is fine
+        elif len(parts) == 3 and parts[2] == compartment:
+            problems.append(f"{shown} is not an exported adapter")  # a file beside the adapter, not inside it
+        elif len(parts) == 3 and parts[2] == INTERNAL:
+            problems.append(f"the private adapter is here ({shown})")
+        elif len(parts) == 3:
+            problems.append(f"{shown} is not an exported adapter (only {compartment or 'the connection'} belongs here)")
+        # deeper paths under a rejected adapter are reported with it
+
+    data = root / "data"  # the connection's own data only
+    for p in sorted(data.iterdir()) if data.is_dir() else []:
+        if p.name == KEEP and p.is_file() or p.name == "tessera" and p.is_dir():
+            continue
+        problems.append(f"data/{_rel(p, data)} is not allowed (only the connection's data/tessera/ belongs here)")
     return problems
 
 

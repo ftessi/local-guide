@@ -49,6 +49,10 @@ def main(argv=None) -> int:
             print(f"Error: {config.agent_dir.name} is a Tessera-facing agent (compartments: {config.compartments}): "
                   "it only answers other agents. Chat with your internal agent instead.", file=sys.stderr)
             return 2
+        if args.command == "serve" and config.tessera_facing and set(config.installables.connections) != {"tessera"}:
+            print(f"Error: {config.agent_dir.name} is a Tessera-facing agent: serve runs only its tessera connection "
+                  f"(installables.yaml lists {sorted(config.installables.connections)})", file=sys.stderr)
+            return 2
         print(f"Agent '{config.name}' at {config.agent_dir}")
         if args.command == "serve" and not config.installables.connections:
             print("Error: installables.yaml lists no connections, so there is nothing to serve.\n"
