@@ -131,6 +131,8 @@ def test_other_agents_cant_use_someone_elses_session(side):
     side.protocol.accept_peer(C.agent_id, name="Carol")
     stolen = next_env(chain, "ask", {"text": "Q?"}, who=C)
     assert send(side, stolen)["body"]["code"] == "expired"
+    assert len(side.protocol.read_record(B.agent_id, welcome["body"]["session"])) == 2
+    assert side.backend.calls == []
 
 
 def test_limits_expiry_and_close(side):
@@ -179,3 +181,60 @@ def test_card_reveals_nothing_about_connections(side):
     assert card["type"] == "card" and card["body"] == {"agent_id": A.agent_id, "name": "Ana's agent",
                                                        "versions": ["0.1"]}
     assert "demo" not in json.dumps(card) and B.agent_id not in json.dumps(card)
+
+
+def test_undecodable_bytes_get_an_error_addressed_to_nobody(side):
+    assert decode(side.endpoint.handle(b"not json"), NOW)["body"]["code"] == "malformed"
+    assert decode(side.endpoint.handle(b"not json"), NOW)["to"] == ""
+    oversized = b"{" + b" " * 65535 + b"}"  # 65537 bytes
+    err = decode(side.endpoint.handle(oversized), NOW)
+    assert err["body"]["code"] == "too_large" and err["to"] == ""
+
+
+def test_a_hello_must_start_at_seq_zero(side):
+    h = sign_envelope(B, type="hello", session="", to=A.agent_id, seq=1, prev="",
+                      body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1"}, now=NOW)
+    assert send(side, h)["body"]["code"] == "bad_chain"
+
+
+def test_a_long_answer_is_cut_to_16000_characters(side):
+    _, chain = open_session(side)
+    side.backend.replies = ["x" * 20000]
+    answer = send(side, next_env(chain, "ask", {"text": "Q?"}))
+    assert answer["type"] == "answer" and len(answer["body"]["text"]) == 16000
+
+
+def test_control_characters_are_cut_by_their_encoded_size(side):
+    _, chain = open_session(side)
+    side.backend.replies = ["" * 16000]  # six bytes each once encoded
+    answer = send(side, next_env(chain, "ask", {"text": "Q?"}))
+    assert answer["type"] == "answer" and len(answer["body"]["text"]) < 16000
+
+
+def test_a_failed_ask_record_closes_the_session(side, monkeypatch):
+    _, chain = open_session(side)
+    real = side.protocol.record_envelope
+
+    def fail_on_ask(other, session, env):
+        if env["type"] == "ask":
+            raise OSError("disk full")
+        return real(other, session, env)
+
+    monkeypatch.setattr(side.protocol, "record_envelope", fail_on_ask)
+    assert send(side, next_env(chain, "ask", {"text": "Q?"}))["body"]["code"] == "unavailable"
+    assert side.backend.calls == []
+    assert send(side, next_env(chain, "ask", {"text": "Q?"}))["body"]["code"] == "expired"
+
+
+def test_a_failed_hello_record_opens_no_session(side, monkeypatch):
+    side.protocol.accept_peer(B.agent_id, name="Bob")
+
+    def fail(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(side.protocol, "record_envelope", fail)
+    assert send(side, hello())["body"]["code"] == "unavailable"
+    for session in ("", "s-" + "0" * 16):
+        ask = sign_envelope(B, type="ask", session=session, to=A.agent_id, seq=2, prev="",
+                            body={"text": "Q?"}, now=NOW)
+        assert send(side, ask)["body"]["code"] == "expired"
