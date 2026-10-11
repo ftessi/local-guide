@@ -1,0 +1,146 @@
+"""Tessera envelopes: one signed JSON object per message, the same shape in both directions."""
+import hashlib
+import json
+from datetime import datetime, timedelta, timezone
+
+from localagent.protocol.identity import AGENT_ID_RE, b64url, verify
+from localagent.protocol.tessera.canonical import CanonicalError, canonical
+
+VERSION = "0.1"
+MAX_BYTES = 64 * 1024
+CLOCK_SKEW = timedelta(minutes=5)
+TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+FIELDS = frozenset({"tessera", "type", "session", "from", "to", "seq", "prev", "time", "body", "sig"})
+ERROR_CODES = frozenset({"bad_signature", "bad_chain", "stale", "too_large", "expired", "limit", "not_allowed",
+                         "malformed", "unavailable"})
+BODIES = {
+    "hello": {"purpose": str, "requested_level": int, "nonce": str},
+    "welcome": {"session": str, "granted_level": int, "expires": str, "limits": dict},
+    "refuse": {},
+    "ask": {"text": str},
+    "answer": {"text": str, "binding": bool},
+    "decline": {},
+    "close": {},
+    "error": {"code": str},
+    "card": {"agent_id": str, "name": str, "versions": list},
+}
+TEXT_LIMITS = {"purpose": 200, "nonce": 64, "session": 64, "expires": 20, "name": 100, "code": 32, "agent_id": 43}
+
+
+class EnvelopeError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def format_time(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime(TIME_FORMAT)
+
+
+def parse_time(text: str) -> datetime:
+    return datetime.strptime(text, TIME_FORMAT).replace(tzinfo=timezone.utc)
+
+
+def encode(env: dict) -> bytes:
+    return canonical(env)
+
+
+def envelope_hash(env: dict) -> str:
+    return b64url(hashlib.sha256(canonical(env)).digest())
+
+
+def sign_envelope(identity, *, type: str, session: str, to: str, seq: int, prev: str, body: dict,
+                  now: datetime) -> dict:
+    env = {"tessera": VERSION, "type": type, "session": session, "from": identity.agent_id, "to": to,
+           "seq": seq, "prev": prev, "time": format_time(now), "body": body}
+    env["sig"] = identity.sign(canonical(env))
+    return env
+
+
+def _is(value, kind) -> bool:
+    return isinstance(value, kind) and not (kind is int and isinstance(value, bool))
+
+
+def check_shape(env) -> None:
+    def bad(why: str):
+        raise EnvelopeError("malformed", why)
+
+    if not isinstance(env, dict) or set(env) != FIELDS:
+        bad("an envelope has exactly the fields " + ", ".join(sorted(FIELDS)))
+    if env["tessera"] != VERSION:
+        bad(f"unsupported version {env['tessera']!r}")
+    if env["type"] not in BODIES:
+        bad(f"unknown type {env['type']!r}")
+    for f in ("session", "from", "to", "prev", "time", "sig"):
+        if not isinstance(env[f], str):
+            bad(f"'{f}' must be text")
+    if not _is(env["seq"], int) or env["seq"] < -1:
+        bad("'seq' must be an integer ≥ -1")
+    if not AGENT_ID_RE.fullmatch(env["from"]) or (env["to"] and not AGENT_ID_RE.fullmatch(env["to"])):
+        bad("'from'/'to' must be agent ids")
+    if len(env["session"]) > 64 or len(env["prev"]) > 64:
+        bad("'session'/'prev' too long")
+    try:
+        parse_time(env["time"])
+    except ValueError:
+        bad("'time' must look like 2026-10-11T12:00:00Z")
+    body, spec = env["body"], BODIES[env["type"]]
+    if not isinstance(body, dict) or set(body) != set(spec):
+        bad(f"a {env['type']} body has exactly: {', '.join(spec) or 'nothing'}")
+    for key, kind in spec.items():
+        if not _is(body[key], kind):
+            bad(f"'{key}' has the wrong type")
+        if kind is str and len(body[key]) > TEXT_LIMITS.get(key, MAX_BYTES):
+            bad(f"'{key}' is too long")
+    t = env["type"]
+    if t in ("hello", "welcome") and not 0 <= body["requested_level" if t == "hello" else "granted_level"] <= 4:
+        bad("levels go from 0 to 4")
+    if t == "answer" and body["binding"] is not False:
+        bad("answers are never binding at levels 1 and 2")
+    if t == "error" and body["code"] not in ERROR_CODES:
+        bad(f"unknown error code {body['code']!r}")
+    if t == "welcome" and (set(body["limits"]) != {"asks", "ask_chars"}
+                           or not all(_is(v, int) and v >= 0 for v in body["limits"].values())):
+        bad("limits are {asks, ask_chars}, both integers")
+    if t == "card" and not all(isinstance(v, str) for v in body["versions"]):
+        bad("versions are text")
+
+
+def _no_duplicate_keys(pairs):
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _no_constants(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def decode(raw: bytes, now: datetime) -> dict:
+    """Bytes to a checked envelope: size, JSON, shape, signature, time. Chain and session checks are the caller's."""
+    if len(raw) > MAX_BYTES:
+        raise EnvelopeError("too_large", f"envelopes are at most {MAX_BYTES} bytes")
+    try:
+        env = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicate_keys, parse_constant=_no_constants)
+    except (UnicodeDecodeError, ValueError):
+        raise EnvelopeError("malformed", "not a JSON object") from None
+    check_shape(env)
+    try:
+        signed = canonical({k: v for k, v in env.items() if k != "sig"})
+    except CanonicalError as e:
+        raise EnvelopeError("malformed", str(e)) from None
+    if not verify(env["from"], signed, env["sig"]):
+        raise EnvelopeError("bad_signature", "the signature doesn't match the sender")
+    if abs(parse_time(env["time"]) - now) > CLOCK_SKEW:
+        raise EnvelopeError("stale", "the envelope's time is more than 5 minutes from ours")
+    return env
+
+
+def sender_of(raw: bytes) -> str:
+    """Best-effort sender of an envelope that failed its checks, only to address the error reply. Never trusted."""
+    try:
+        value = json.loads(raw.decode("utf-8")).get("from")
+    except (UnicodeDecodeError, ValueError, AttributeError):
+        return ""
+    return value if isinstance(value, str) and AGENT_ID_RE.fullmatch(value) else ""
