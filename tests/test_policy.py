@@ -1,6 +1,6 @@
 import pytest
 
-from localagent.protocol.policy import PeerEntry, PolicyError, load_policy
+from localagent.protocol.policy import Policy, PeerEntry, PolicyError, load_policy, save_policy
 from localagent.protocol.scopes import InvalidScope, Scope
 
 BOB = "B" * 43
@@ -36,7 +36,6 @@ def test_peer_entries(tmp_path):
 
 
 def test_save_and_load_round_trip(tmp_path):
-    from localagent.protocol.policy import Policy, save_policy
     policy = Policy(owner=Scope(["all"]), peers={BOB: PeerEntry("Bob's agent", 1)})
     save_policy(tmp_path / "policy.yaml", policy)
     text = (tmp_path / "policy.yaml").read_text(encoding="utf-8")
@@ -51,7 +50,9 @@ def test_save_and_load_round_trip(tmp_path):
     (f"peers:\n  {BOB}: {{name: Bob, connection: demo, level: 1}}\n", "level: 1"),
     (f"peers:\n  {BOB}: {{name: Bob, level: 3}}\n", "only 1"),
     (f"peers:\n  {BOB}: {{name: Bob, level: true}}\n", "only 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, level: 1.0}}\n", "only 1"),
     ("peers:\n  shortid: {name: Bob, level: 1}\n", "not an agent id"),
+    (f'peers:\n  "{BOB}\\n": {{name: Bob, level: 1}}\n', "not an agent id"),
     (f"peers:\n  {BOB}: {{name: '', level: 1}}\n", "name"),
 ])
 def test_peer_format_errors(tmp_path, text, fragment):

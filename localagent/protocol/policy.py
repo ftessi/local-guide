@@ -1,15 +1,14 @@
 """policy.yaml: what your own sessions get, and which agents you accepted, at which Tessera level. Peers are
 only used by a Tessera-facing agent, which serves exactly one connection (its only compartment)."""
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
+from localagent.protocol.identity import AGENT_ID_RE
 from localagent.protocol.scopes import InvalidScope, Scope
 
 LEVELS_AVAILABLE = (1,)  # 1 = Ask. Tessera levels 2-4 are specified but not implemented yet
-_AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{43}$")
 HEADER = ("# Who may see what. owner: your own sessions. peers: agents you accepted (python -m localagent peers)\n"
           "# and their Tessera level (1 = Ask). Only a Tessera-facing agent (one compartment) uses peers.\n"
           "# `peers accept/reject/remove` rewrite this file: comments other than this header are not kept.\n")
@@ -35,11 +34,11 @@ class Policy:
 
 
 def make_peer_entry(agent_id, name, level, where: str = "policy.yaml") -> PeerEntry:
-    if not isinstance(agent_id, str) or not _AGENT_ID.match(agent_id):
+    if not isinstance(agent_id, str) or not AGENT_ID_RE.fullmatch(agent_id):
         raise PolicyError(f"{where}: '{agent_id}' is not an agent id (43 characters, from `python -m localagent id`)")
     if not isinstance(name, str) or not name.strip():
         raise PolicyError(f"{where}: peer {agent_id[:8]}… needs a name")
-    if isinstance(level, bool) or level not in LEVELS_AVAILABLE:
+    if type(level) is not int or level not in LEVELS_AVAILABLE:
         raise PolicyError(f"{where}: peer {name}: level {level} is not available (only 1 = Ask for now)")
     return PeerEntry(name.strip(), level)
 
