@@ -5,8 +5,8 @@ transformers>=4.40.0
 accelerate>=0.27.0
 bitsandbytes>=0.50.0
 
-# Optional: load trained LoRA adapters (training sub-project)
-# peft>=0.13
+# LoRA adapters: training (python -m localagent train) and loading per session
+peft==0.21.2
 
 # Agent folder, identity
 pyyaml>=6.0
