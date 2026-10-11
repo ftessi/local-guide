@@ -7,9 +7,14 @@ push_subscriptions.json
 models/
 
 # ── Personal data ──────────────────────────────────────
+# Your agent folder (created by scripts/new_agent.py). Any extra agent folders: add them here.
+my-agent/
 calendar.db
 *.db
 knowledge/private/
+
+# ── Installed tools and connections (python -m localagent install) ──
+extensions/
 
 # ── Python / tooling ───────────────────────────────────
 .venv/

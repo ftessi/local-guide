@@ -92,7 +92,7 @@ This creates a CNAME record in Cloudflare DNS pointing your domain to the tunnel
 ```bash
 cd W:\LocalAgent
 .venv\Scripts\activate
-python server.py
+python -m localagent serve
 ```
 
 Wait for "Server ready." (model loads ~10s).
@@ -103,7 +103,7 @@ cloudflared tunnel run local-agent
 ```
 
 Open `https://yourdomain.com` on your phone. You should see the chat interface.
-Enter your AGENT_SECRET token when prompted (find it in `W:\LocalAgent\.env`).
+Enter your AGENT_SECRET token when prompted (find it in `my-agent/.env`).
 
 ---
 
@@ -126,7 +126,7 @@ sc stop cloudflared
 
 **Auto-start the agent server via Task Scheduler:**
 
-1. The launcher already exists: `W:\LocalAgent\scripts\start_server.bat` (activates the venv and runs `python server.py`).
+1. The launcher already exists: `W:\LocalAgent\scripts\start_server.bat` (activates the venv and runs `python -m localagent serve`).
 
 2. Open **Task Scheduler** → Create Basic Task
    - Name: `LocalAgent Server`
@@ -153,10 +153,10 @@ sc stop cloudflared
 - Verify DNS propagation: https://dnschecker.org
 
 **Token rejected (WebSocket closes immediately):**
-- Double-check AGENT_SECRET in `.env` matches what you entered in the prompt
+- Double-check AGENT_SECRET in `my-agent/.env` matches what you entered in the prompt
 - Session storage caches the token — clear site data in browser settings to re-enter it
 
 **Push notifications not arriving:**
-- VAPID keys must be set in `.env` before the server starts
+- VAPID keys must be set in `my-agent/.env` (created automatically by `scripts/new_agent.py`) before the server starts
 - On iOS, PWA must be installed to home screen (not just open in browser) for push to work
 - Check browser console for push registration errors

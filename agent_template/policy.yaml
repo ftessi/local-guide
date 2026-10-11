@@ -1,0 +1,5 @@
+# Who may see what. Scopes: all, knowledge:<c>, memory:<c>, work:<c>, adapter:<c>,
+# tool:<name>, tool:<name>:<action>. Peer connections arrive in a later version.
+owner: [all]
+default_peer: [knowledge:shared, adapter:shared]
+peers: {}

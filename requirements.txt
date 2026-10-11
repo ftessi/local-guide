@@ -5,14 +5,15 @@ transformers>=4.40.0
 accelerate>=0.27.0
 bitsandbytes>=0.50.0
 
-# Web server, calendar, push
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-websockets>=12.0
+# Optional: load trained LoRA adapters (training sub-project)
+# peft>=0.13
+
+# Agent folder, identity
+pyyaml>=6.0
+cryptography>=42
 python-dotenv>=1.0.0
-apscheduler>=3.10.0,<4
-pywebpush>=2.0.0
 
 # Tests
 pytest>=8.0
-httpx>=0.27
+
+# Tools and connections bring their own requirements.txt; `python -m localagent install` installs them.

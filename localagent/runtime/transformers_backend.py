@@ -1,0 +1,112 @@
+"""HuggingFace Transformers backend (NVIDIA / CUDA, CPU fallback)."""
+from pathlib import Path
+from threading import Thread
+
+from localagent.runtime.base import AdapterLoadError
+
+# Tokens that open a new chat turn in common templates (ChatML/Qwen, Llama 3, Gemma, Phi).
+# Small models sometimes skip their end-of-turn token and start inventing the user's next message;
+# stopping on these as well ends the reply where it should.
+TURN_START_TOKENS = ("<|im_start|>", "<|start_header_id|>", "<start_of_turn>", "<|user|>")
+
+
+class TransformersBackend:
+    name = "transformers"
+
+    def __init__(self):
+        self.model = None
+        self.tokenizer = None
+        self.model_id = ""
+        self._adapters: list[Path] = []
+        self._stop_ids: list[int] = []
+
+    def load(self, model_id: str, quantization: str = "4bit") -> None:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16
+            )
+        elif quantization == "fp16":
+            kwargs["dtype"] = torch.float16
+        elif quantization != "none":
+            raise ValueError(f"Unknown quantization '{quantization}'")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        self.model_id = model_id
+        self._stop_ids = self._find_stop_ids()
+
+    def _find_stop_ids(self) -> list[int]:
+        eos = self.model.generation_config.eos_token_id
+        ids = set(eos if isinstance(eos, list) else [eos] if eos is not None else [])
+        if self.tokenizer.eos_token_id is not None:
+            ids.add(self.tokenizer.eos_token_id)
+        vocab = self.tokenizer.get_vocab()
+        ids.update(vocab[t] for t in TURN_START_TOKENS if t in vocab)
+        return sorted(ids)
+
+    def _prepare_inputs(self, messages: list[dict]):
+        text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        return self.tokenizer([text], return_tensors="pt").to(self.model.device)
+
+    def generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
+        inputs = self._prepare_inputs(messages)
+        input_len = inputs["input_ids"].shape[1]
+        output_ids = self.model.generate(
+            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
+            pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None,
+        )
+        return self.tokenizer.decode(output_ids[0][input_len:], skip_special_tokens=True).strip()
+
+    def generate_stream(self, messages: list[dict], max_new_tokens: int = 256):
+        from transformers import TextIteratorStreamer
+
+        inputs = self._prepare_inputs(messages)
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        thread = Thread(target=self.model.generate, kwargs=dict(
+            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
+            pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None,
+            streamer=streamer,
+        ))
+        thread.start()
+        for chunk in streamer:
+            yield chunk
+        thread.join()
+
+    def set_adapters(self, paths: list[Path]) -> None:
+        paths = [Path(p) for p in paths]
+        if paths == self._adapters:
+            return
+        self._remove_adapters()
+        if not paths:
+            return
+        model = None
+        try:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(self.model, str(paths[0]), adapter_name="a0")
+            for i, path in enumerate(paths[1:], start=1):
+                model.load_adapter(str(path), adapter_name=f"a{i}")
+            model.base_model.set_adapter([f"a{i}" for i in range(len(paths))])
+        except Exception as e:
+            if model is not None:
+                try:
+                    self.model = model.unload()
+                except Exception:
+                    pass
+            hint = " (pip install peft)" if isinstance(e, ImportError) else ""
+            raise AdapterLoadError(f"Could not load adapters {[str(p) for p in paths]}: {e}{hint}") from e
+        self.model = model
+        self._adapters = paths
+
+    def _remove_adapters(self) -> None:
+        if self._adapters:
+            self.model = self.model.unload()
+            self._adapters = []
+
+    def info(self) -> dict:
+        device = str(getattr(self.model, "device", "unknown")) if self.model is not None else "not loaded"
+        return {"model_id": self.model_id, "backend": self.name, "device": device,
+                "adapters": [str(p) for p in self._adapters]}
