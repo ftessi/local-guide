@@ -1,4 +1,5 @@
 """A session: who is talking, what they may see, and the only door to the agent's data."""
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,7 @@ def model_slug(model_id: str) -> str:
 
 RESET_EVENT = "history_reset"
 PLAIN_TURNS = 2  # with tools, how many of the latest turns answered without one are replayed (see history())
+OWNER_ADAPTER = "private"  # the internal model; peers get their connection's adapter, never this one
 
 
 def _valid_transcript(transcript) -> bool:
@@ -123,9 +125,24 @@ class Session:
         return WITHHELD
 
     def adapters(self, model_id: str) -> list[Path]:
-        base = self.adapters_dir / model_slug(model_id)
-        return [base / c for c in self.vault.compartments
-                if self.scope.allows("adapter", c) and (base / c).is_dir()]
+        """The one adapter this session uses: `private` for the owner, its connection's for a peer. Adapters are
+        never combined: one trained to answer and one trained to decline the same question would fight."""
+        allowed = [c for c in self.vault.compartments if self.scope.allows("adapter", c)]
+        if self.scope.is_all:
+            allowed = [c for c in allowed if c == OWNER_ADAPTER]
+        if len(allowed) > 1:
+            raise ValueError(f"Session '{self.principal}' may load adapters {allowed}; a session uses exactly one")
+        path = self.adapters_dir / model_slug(model_id) / allowed[0] if allowed else None
+        if path is None or not path.is_dir():
+            return []
+        try:
+            trained_for = json.loads((path / "adapter.json").read_text(encoding="utf-8")).get("base_model")
+        except (OSError, ValueError, AttributeError):
+            trained_for = None
+        if trained_for and trained_for != model_id:
+            raise ValueError(f"Adapter {path} was trained for {trained_for}, not {model_id}. "
+                             f"Retrain it: python -m localagent train --adapter {allowed[0]}")
+        return [path]
 
     def record(self, turn: dict) -> None:
         self.vault.append_memory(self.memory_compartment, turn)

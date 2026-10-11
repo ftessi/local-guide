@@ -70,12 +70,39 @@ def test_tool_result_withheld_outside_compartment(agent_dir):
     assert make(agent_dir, ["all"]).filter_tool_result("calendar", {"x": 1}) == {"x": 1}
 
 
-def test_adapters_per_scope(agent_dir):
+def adapter(agent_dir, compartment, base_model="org/model"):
+    path = agent_dir / f"training/adapters/org--model/{compartment}"
+    path.mkdir(parents=True)
+    (path / "adapter.json").write_text(json.dumps({"compartment": compartment, "base_model": base_model}))
+    return path
+
+
+def test_one_adapter_per_session(agent_dir):
+    """Adapters are never combined: one trained to answer and one trained to decline would fight."""
     for c in ("private", "shared"):
-        (agent_dir / f"training/adapters/org--model/{c}").mkdir(parents=True)
-    assert [p.name for p in make(agent_dir, ["all"]).adapters("org/model")] == ["private", "shared"]
+        adapter(agent_dir, c)
+    assert [p.name for p in make(agent_dir, ["all"]).adapters("org/model")] == ["private"]
     assert [p.name for p in make(agent_dir, ["adapter:shared"]).adapters("org/model")] == ["shared"]
     assert make(agent_dir, ["adapter:shared"]).adapters("other/model") == []
+    assert make(agent_dir, ["knowledge:shared"]).adapters("org/model") == []
+
+
+def test_a_peer_never_gets_the_private_adapter(agent_dir):
+    adapter(agent_dir, "private")
+    assert make(agent_dir, ["adapter:shared"], memory="peer:x").adapters("org/model") == []
+
+
+def test_more_than_one_adapter_in_a_scope_is_refused(agent_dir):
+    for c in ("private", "shared"):
+        adapter(agent_dir, c)
+    with pytest.raises(ValueError, match="exactly one"):
+        make(agent_dir, ["adapter:private", "adapter:shared"]).adapters("org/model")
+
+
+def test_adapter_for_another_base_model_is_refused(agent_dir):
+    adapter(agent_dir, "private", base_model="someone/else")
+    with pytest.raises(ValueError, match="someone/else"):
+        make(agent_dir, ["all"]).adapters("org/model")
 
 
 def test_record_and_history(agent_dir):
