@@ -14,7 +14,7 @@ from localagent.protocol.session import WITHHELD, ScopeError, Session, UnknownTo
 from localagent.runtime.base import Backend
 
 log = logging.getLogger(__name__)
-MAX_ROUNDS = 2
+MAX_ROUNDS = 4  # up to 3 tool calls in a row (e.g. search, then open a page), then the answer
 RECENT_TURNS = 3       # how many more messages the latest tool results stay visible, for follow-up questions
 RECENT_CHARS = 1500  # this sits in the system prompt, which the prompt budget never trims
 YES = {"yes", "y", "ok", "okay", "allow", "si", "sí"}  # approves tools marked confirm: true
@@ -66,18 +66,21 @@ CUT_NOTE = "\n…[cut to fit the prompt budget]"
 
 def _fit(system: dict, history: list[dict], turn: list[dict], budget: int) -> list[dict]:
     """Keeps the prompt within `budget` characters (long prompts run small GPUs out of memory): drops the
-    oldest history turns first, then shortens the newest message (usually a big tool result)."""
+    oldest history turns first, then shortens this reply's messages, newest first (usually big tool results)."""
     def size(msgs):
         return sum(len(m["content"]) for m in msgs)
 
-    history = list(history)
+    history, turn = list(history), list(turn)
     while history and size([system, *history, *turn]) > budget:
         del history[:2]  # one user + assistant pair
-    over = size([system, *history, *turn]) - budget
-    if over > 0:
-        last = turn[-1]
-        keep = max(200, len(last["content"]) - over - len(CUT_NOTE))
-        turn = [*turn[:-1], {**last, "content": last["content"][:keep] + CUT_NOTE}]
+    for i in reversed(range(len(turn))):
+        over = size([system, *history, *turn]) - budget
+        if over <= 0:
+            break
+        content = turn[i]["content"]
+        keep = max(200, len(content) - over - len(CUT_NOTE))
+        if keep < len(content):
+            turn[i] = {**turn[i], "content": content[:keep] + CUT_NOTE}
     return [system, *history, *turn]
 
 

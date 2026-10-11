@@ -58,12 +58,34 @@ def test_read_tool_gets_second_round(env):
     assert "Dentist" in backend.calls[1][-1]["content"]
 
 
-def test_second_round_tool_calls_not_executed(env):
+def test_tool_calls_in_the_final_round_are_not_executed(env):
     _, tools, proto = env
-    agent, backend = make_agent(tools, [LIST, "Done " + CREATE])
+    agent, backend = make_agent(tools, [LIST, LIST, LIST, "Done " + CREATE])
     agent.respond(proto.open_owner_session("t"), "x")
     assert tools["notes"].notes == []
-    assert len(backend.calls) == 2
+    assert len(backend.calls) == 4  # three tool rounds, then the answer
+
+
+def test_search_then_read_then_answer(env):
+    """Like web.search followed by opening a page: a second read in the same reply, then the answer."""
+    _, tools, proto = env
+    tools["notes"].run("add", {"text": "the page says 42 seats", "due": "2030-01-01T10:00:00"})
+    agent, backend = make_agent(tools, [LIST, LIST, "It says 42 seats."])
+    reply = agent.respond(proto.open_owner_session("t"), "how many seats?")
+    assert reply.endswith("It says 42 seats.") and reply.count("(used notes.list)") == 2
+    assert len(backend.calls) == 3
+    third = backend.calls[2]
+    assert [m["role"] for m in third[-4:]] == ["assistant", "user", "assistant", "user"]  # call, result, call, result
+    assert "42 seats" in third[-1]["content"]
+
+
+def test_prompt_budget_shortens_earlier_results_of_the_same_reply_too(env):
+    _, tools, proto = env
+    tools["notes"].run("add", {"text": "y" * 6000, "due": "2030-01-01T10:00:00"})
+    backend = FakeBackend(replies=[LIST, LIST, "ok"])
+    agent = Agent(backend, tools, model_id="org/model", history_turns=5, clock=lambda: NOW, max_prompt_chars=5000)
+    agent.respond(proto.open_owner_session("t"), "read twice")
+    assert sum(len(m["content"]) for m in backend.calls[2]) <= 5000
 
 
 def test_unterminated_tag_not_executed(env):

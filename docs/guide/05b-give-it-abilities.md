@@ -160,7 +160,7 @@ Your agent's data protection rests on one rule: **nothing reads your data except
 
 Things to know with small local models:
 - **Fewer actions, better calls.** Every action is text in the prompt. Aim for about 10 actions across all tools.
-- **One look-up per message.** After a read the model gets one more turn to answer; it can't chain many steps (list a folder, then read each file) in one message. Ask step by step.
+- **Up to 3 tools per message.** E.g. search, then open a page, then answer. Longer chains (list a folder, then read every file) don't fit; ask step by step.
 - **Long results are cut** at `max_result_chars`.
 
 ## Troubleshooting

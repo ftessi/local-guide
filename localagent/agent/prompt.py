@@ -18,6 +18,7 @@ Never pretend: don't say you searched, fetched or ran anything unless you wrote 
 Never invent facts, numbers or sources. If you don't know, use a tool, or say you don't know.
 Arguments: use exactly the names listed. Dates and times are ISO 8601 (2026-10-12T18:00:00).
 After a "read" action you will receive the result and can then answer with the real data.
+If a result isn't enough to answer (e.g. it only lists pages), use another tool first, such as opening one of those pages. Up to 3 tools in a row.
 
 Available tools:"""
 
