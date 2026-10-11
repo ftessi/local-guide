@@ -16,7 +16,7 @@ def test_create_agent(tmp_path):
     assert (d / "knowledge/private").is_dir() and (d / "knowledge/shared").is_dir()
     # The template is a menu of commented examples: nothing is installed until the owner opts in
     assert cfg.installables.tools == {} and cfg.installables.connections == {}
-    assert "mcp_server_fetch" in (d / "installables.yaml").read_text(encoding="utf-8")
+    assert "duckduckgo_mcp_server" in (d / "installables.yaml").read_text(encoding="utf-8")
 
 
 def test_create_agent_refuses_existing(tmp_path):

@@ -35,7 +35,9 @@ CASES = {
         ("What reminders do I have?", "list", {}),
         ("Delete reminder 5", "delete", {}),
     ],
-    "web": [
+    "web": [  # cases run only for the actions your web tool has (fetch server: fetch; DuckDuckGo: the others)
+        ("Search the web for the results of the 2026 Berlin state election", "search", {"query": "berlin"}),
+        ("What does the page https://example.com say?", "fetch_content", {"url": "example.com"}),
         ("What does the page https://example.com say?", "fetch", {"url": "example.com"}),
     ],
     "files": [
@@ -75,7 +77,9 @@ def main() -> int:
         finally:
             close_tools(tools)  # only their action lists are needed
     system = build_system_prompt([], views, NOW)
-    cases = [(tool, *case) for tool, items in CASES.items() if tool is None or tool in tools for case in items]
+    actions = {view.name: view.actions for view in views}
+    cases = [(tool, *case) for tool, items in CASES.items() for case in items
+             if tool is None or case[1] in actions.get(tool, {})]
     print(f"Tools in the prompt: {', '.join(tools) or 'none'} ({len(system)} characters of system prompt)")
 
     ensure_hf_home()

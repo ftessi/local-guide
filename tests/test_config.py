@@ -76,6 +76,7 @@ def test_env_file_and_environment(tmp_path, monkeypatch):
     ("compartments: [private, private]\n", "duplicate"),
     ("modle:\n  id: x\n", "modle"),
     ("model:\n  max_new_tokens: 0\n", "max_new_tokens"),
+    ("model:\n  max_prompt_chars: 10\n", "max_prompt_chars"),
 ])
 def test_invalid_values_rejected(tmp_path, text, fragment):
     with pytest.raises(ConfigError, match=fragment):

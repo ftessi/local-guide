@@ -43,7 +43,7 @@ def test_write_tool_executed_and_hidden(env):
     _, tools, proto = env
     agent, backend = make_agent(tools, ["Reminder set! " + CREATE])
     reply = agent.respond(proto.open_owner_session("t"), "remind me")
-    assert reply == "Reminder set!"
+    assert reply == "Reminder set!\n\n(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"  # what really ran is always shown
     assert [n["text"] for n in tools["notes"].notes] == ["Dentist"]
     assert len(backend.calls) == 1
 
@@ -53,7 +53,7 @@ def test_read_tool_gets_second_round(env):
     tools["notes"].run("add", {"text": "Dentist", "due": "2030-01-01T10:00:00"})
     agent, backend = make_agent(tools, ["Let me check. " + LIST, "You have: Dentist."])
     reply = agent.respond(proto.open_owner_session("t"), "what reminders?")
-    assert reply == "Let me check.\n\nYou have: Dentist."
+    assert reply == "Let me check.\n\n(used notes.list)\n\nYou have: Dentist."
     assert backend.calls[1][-1]["content"].startswith("Tool results")
     assert "Dentist" in backend.calls[1][-1]["content"]
 
@@ -85,7 +85,9 @@ def test_stream_never_shows_tags(env):
     _, tools, proto = env
     agent, _ = make_agent(tools, ["Reminder set! " + CREATE])
     chunks = list(agent.respond_stream(proto.open_owner_session("t"), "x"))
-    assert "<tool" not in "".join(chunks) and "".join(chunks).strip() == "Reminder set!"
+    assert "<tool" not in "".join(chunks)
+    streamed = "".join(chunks).replace(" \n", "\n")  # the space before a hidden tag may stream out
+    assert streamed == "Reminder set!\n\n(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"
 
 
 def test_history_included_next_turn(env):
@@ -133,7 +135,7 @@ def test_history_shows_model_its_working_calls_not_failure_notices(env):
     agent, backend = make_agent(tools, [CREATE + bad, "next"])
     session = proto.open_owner_session("t")
     shown = agent.respond(session, "remind me")
-    assert "Done." in shown and "Couldn't run notes.read" in shown  # the user sees both
+    assert "(used notes.add: " in shown and "Couldn't run notes.read" in shown  # the user sees both
     agent.respond(session, "and then?")
     replayed = backend.calls[1][2]  # [system, user, assistant, user]
     assert replayed["role"] == "assistant"
@@ -168,7 +170,7 @@ def test_confirm_tool_waits_for_yes(env):
     assert "notes.add" in first and '"rm -rf"' in first and "yes" in first
     second = agent.respond(session, "Yes")
     assert [n["text"] for n in tools["notes"].notes] == ["rm -rf"]
-    assert second == "Saved it."
+    assert second == '(used notes.add: text="rm -rf", due="2030-01-01T10:00:00")\n\nSaved it.'
     assert backend.calls[1][-1]["content"].startswith("I allowed it. Tool results")
 
 
@@ -192,3 +194,60 @@ def test_confirmation_still_goes_through_the_guard(env):
     agent.respond(limited, "save a note")
     reply = agent.respond(limited, "yes")
     assert tools["notes"].notes == [] and "Couldn't run notes.add" in reply
+
+
+def test_claimed_but_not_called_shows_no_used_line(env):
+    _, tools, proto = env
+    agent, _ = make_agent(tools, ["Fetching the results... Here they are: SPD 39%."])
+    reply = agent.respond(proto.open_owner_session("t"), "search the election")
+    assert "(used" not in reply
+
+
+def test_recent_results_stay_available_for_follow_ups(env):
+    _, tools, proto = env
+    tools["notes"].run("add", {"text": "see https://example.com/source", "due": "2030-01-01T10:00:00"})
+    agent, backend = make_agent(tools, [LIST, "One note.", "From example.com.", "a", "b", "c"])
+    session = proto.open_owner_session("t")
+    agent.respond(session, "what notes do I have?")
+    agent.respond(session, "which page was that?")
+    follow_up_system = backend.calls[2][0]["content"]
+    assert "Results of your latest tool calls" in follow_up_system
+    assert "https://example.com/source" in follow_up_system
+    for text in ("x", "y", "z"):
+        agent.respond(session, text)
+    assert "https://example.com/source" not in backend.calls[-1][0]["content"]  # forgotten after a few turns
+
+
+def test_recent_results_are_per_session(env):
+    _, tools, proto = env
+    tools["notes"].run("add", {"text": "secret", "due": "2030-01-01T10:00:00"})
+    agent, backend = make_agent(tools, [LIST, "One note.", "hi"])
+    agent.respond(proto.open_owner_session("t"), "what notes?")
+    agent.respond(proto.open_owner_session("t"), "hello")
+    assert "secret" not in backend.calls[-1][0]["content"]
+
+
+def test_prompt_budget_drops_oldest_history_first(env):
+    _, tools, proto = env
+    backend = FakeBackend(replies=["first answer " * 40, "second", "third"])
+    agent = Agent(backend, tools, model_id="org/model", history_turns=5, clock=lambda: NOW, max_prompt_chars=3000)
+    session = proto.open_owner_session("t")
+    agent.respond(session, "old question " * 100)  # big enough that the prompt must be trimmed
+    agent.respond(session, "recent question")
+    agent.respond(session, "now")
+    prompt = backend.calls[-1]
+    assert sum(len(m["content"]) for m in prompt) <= 3000
+    contents = [m["content"] for m in prompt]
+    assert "recent question" in contents and contents[-1] == "now"
+    assert not any("old question" in c for c in contents)  # the oldest turn went first
+
+
+def test_prompt_budget_shortens_a_huge_tool_result(env):
+    _, tools, proto = env
+    tools["notes"].run("add", {"text": "x" * 20000, "due": "2030-01-01T10:00:00"})
+    backend = FakeBackend(replies=[LIST, "Done reading."])
+    agent = Agent(backend, tools, model_id="org/model", history_turns=5, clock=lambda: NOW, max_prompt_chars=4000)
+    agent.respond(proto.open_owner_session("t"), "read my notes")
+    second_round = backend.calls[1]
+    assert sum(len(m["content"]) for m in second_round) <= 4000
+    assert second_round[-1]["content"].startswith("Tool results") and "[cut to fit" in second_round[-1]["content"]

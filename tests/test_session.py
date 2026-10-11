@@ -106,3 +106,14 @@ def test_history_replays_models_own_words_without_tool_results(agent_dir):
     assert s.history(10) == [{"role": "user", "content": "u1"},
                              {"role": "assistant", "content": "Checking.\n<tool>{}</tool>\n\nNothing."},
                              {"role": "user", "content": "u2"}, {"role": "assistant", "content": "a2"}]
+
+
+def test_reset_survives_a_restart(agent_dir):
+    s = make(agent_dir, ["all"])
+    s.record({"user": "bad question", "assistant": "invented answer"})
+    s.reset_history()
+    s.record({"user": "after", "assistant": "fine"})
+    restarted = make(agent_dir, ["all"])  # a new session reads memory from disk again
+    assert [m["content"] for m in restarted.history(10)] == ["after", "fine"]
+    records = [i.content for i in restarted.vault.read("memory", ["private"])]
+    assert records[0]["assistant"] == "invented answer"  # kept on disk (training, audit), just not replayed

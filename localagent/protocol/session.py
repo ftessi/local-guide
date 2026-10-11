@@ -27,6 +27,9 @@ def model_slug(model_id: str) -> str:
     return model_id.replace("/", "--")
 
 
+RESET_EVENT = "history_reset"
+
+
 def _valid_transcript(transcript) -> bool:
     return (isinstance(transcript, list) and bool(transcript)
             and all(isinstance(m, dict) and m.get("role") in ("user", "assistant")
@@ -44,7 +47,6 @@ class Session:
         self.audit = audit
         self._tools = tools
         self.adapters_dir = Path(adapters_dir)
-        self._history_offset = 0
 
     def _compartments(self, kind: str) -> list[str]:
         return [c for c in self.vault.list_compartments(kind) if self.scope.allows(kind, c)]
@@ -61,8 +63,12 @@ class Session:
         """Last n turns of this session's own conversation, as chat messages."""
         if n <= 0:
             return []
+        records = self._own_memory()
+        resets = [i for i, r in enumerate(records) if r.get("event") == RESET_EVENT]
+        if resets:  # history starts after the latest reset, even across restarts
+            records = records[resets[-1] + 1:]
         messages = []
-        for record in self._own_memory()[self._history_offset:][-n:]:
+        for record in records[-n:]:
             if isinstance(record.get("user"), str) and isinstance(record.get("assistant"), str):
                 messages.append({"role": "user", "content": record["user"]})
                 # transcript = what the model itself said and was told (tool tags, tool results);
@@ -78,7 +84,8 @@ class Session:
         return messages
 
     def reset_history(self) -> None:
-        self._history_offset = len(self._own_memory())
+        """Stop replaying earlier turns to the model, for good. They stay saved in memory/."""
+        self.vault.append_memory(self.memory_compartment, {"event": RESET_EVENT})
 
     def tools(self) -> list[ToolView]:
         views = []

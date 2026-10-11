@@ -32,7 +32,7 @@ def test_mcp_tool_end_to_end(tmp_path, monkeypatch):
     try:
         assert (d / "workspace").is_dir()
         reply = s.agent.respond(s.protocol.open_owner_session("abc"), "echo ping loudly")
-        assert reply == "Checking.\n\nThe server said PING."
+        assert reply == 'Checking.\n\n(used test.echo: text="ping", shout=true)\n\nThe server said PING.'
         assert 'test.echo: {"result": "PING"}' in backend.calls[1][-1]["content"]
         assert 'name "test", action "echo"' in backend.calls[0][0]["content"]
         assert "broken" not in backend.calls[0][0]["content"]  # only the listed actions are shown

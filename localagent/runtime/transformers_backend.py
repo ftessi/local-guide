@@ -10,6 +10,26 @@ from localagent.runtime.base import AdapterLoadError
 TURN_START_TOKENS = ("<|im_start|>", "<|start_header_id|>", "<start_of_turn>", "<|user|>")
 
 
+def stream_in_thread(generate, kwargs: dict, streamer):
+    """Runs generate(**kwargs) in a thread and yields the streamer's text. If generation fails (e.g. out of GPU
+    memory), the stream is ended and the error raised here; otherwise the reader would wait forever."""
+    errors = []
+
+    def run():
+        try:
+            generate(**kwargs)
+        except BaseException as e:
+            errors.append(e)
+            streamer.end()
+
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    yield from streamer
+    thread.join()
+    if errors:
+        raise errors[0]
+
+
 class TransformersBackend:
     name = "transformers"
 
@@ -63,17 +83,21 @@ class TransformersBackend:
     def generate_stream(self, messages: list[dict], max_new_tokens: int = 256):
         from transformers import TextIteratorStreamer
 
+        import torch
+
         inputs = self._prepare_inputs(messages)
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        thread = Thread(target=self.model.generate, kwargs=dict(
-            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
-            pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None,
-            streamer=streamer,
-        ))
-        thread.start()
-        for chunk in streamer:
-            yield chunk
-        thread.join()
+        kwargs = dict(**inputs, max_new_tokens=max_new_tokens, do_sample=False,
+                      pad_token_id=self.tokenizer.eos_token_id, eos_token_id=self._stop_ids or None,
+                      streamer=streamer)
+        try:
+            yield from stream_in_thread(self.model.generate, kwargs, streamer)
+        except torch.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            raise RuntimeError(
+                f"Out of GPU memory: the prompt was {inputs['input_ids'].shape[1]} tokens, too long for this GPU. "
+                "Lower model.max_prompt_chars in agent.yaml, or type 'reset' to drop old conversation."
+            ) from None
 
     def set_adapters(self, paths: list[Path]) -> None:
         paths = [Path(p) for p in paths]

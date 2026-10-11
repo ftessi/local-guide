@@ -27,10 +27,14 @@ Open `my-agent/installables.yaml` and add what you want under `tools:`. All thre
 
 ```yaml
 tools:
-  web:                                    # read web pages
-    mcp: [python, -m, mcp_server_fetch]
-    pip: mcp-server-fetch
-    actions: [fetch]
+  web:                                    # search the web and read pages (DuckDuckGo, no account)
+    mcp: [python, -m, duckduckgo_mcp_server.server]
+    pip: duckduckgo-mcp-server==0.6.1     # 0.7+ needs mcp 2.x, which other servers don't support yet
+    actions: [search, fetch_content]
+    fixed_args: {max_results: 5}
+    describe:
+      search: Search the web. Returns titles, links and short summaries of pages
+      fetch_content: Read the text of a web page, given its URL
     compartment: shared                   # web pages aren't private data
 
   files:                                  # read and write files, only inside my-agent/workspace/
@@ -61,8 +65,8 @@ It shows each tool starting and which actions the model will see:
 
 ```
 tools/web
-  pip install mcp-server-fetch
-  ok: MCP server runs; the model sees 1 action(s): fetch
+  pip install duckduckgo-mcp-server==0.6.1
+  ok: MCP server runs; the model sees 2 action(s): search, fetch_content
 tools/files
   ok: MCP server runs; the model sees 4 action(s): list_directory, read_text_file, write_file, create_directory
 tools/terminal

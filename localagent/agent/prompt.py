@@ -14,6 +14,8 @@ Examples of complete replies:
 {examples}
 
 If no tool is needed, just answer normally with no tag.
+Never pretend: don't say you searched, fetched or ran anything unless you wrote the tag and got its result.
+Never invent facts, numbers or sources. If you don't know, use a tool, or say you don't know.
 Arguments: use exactly the names listed. Dates and times are ISO 8601 (2026-10-12T18:00:00).
 After a "read" action you will receive the result and can then answer with the real data.
 
@@ -39,7 +41,7 @@ def _dates(now: datetime) -> str:
             "Next days: " + ", ".join(f"{d:%A} {d:%Y-%m-%d}" for d in days))
 
 
-def build_system_prompt(items: list, tools: list, now: datetime) -> str:
+def build_system_prompt(items: list, tools: list, now: datetime, recent: str = "") -> str:
     sections = [BASE_PROMPT, _dates(now)]
     tools = [view for view in tools if view.actions]
     if tools:
@@ -51,6 +53,9 @@ def build_system_prompt(items: list, tools: list, now: datetime) -> str:
                 lines.append(f'- name "{view.name}", action "{action_name}" ({action.kind}): '
                              f"{action.description.rstrip('.')}. args: {{{params}}}")
         sections.append("\n".join(lines))
+    if recent:
+        sections.append("Results of your latest tool calls (use them for follow-up questions, "
+                        "and name the pages/URLs they came from when asked):\n" + recent)
     knowledge = [i.content for i in items if i.kind == "knowledge"]
     if knowledge:
         sections.append("What you know:\n\n" + "\n\n".join(knowledge))

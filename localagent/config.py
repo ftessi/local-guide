@@ -25,6 +25,7 @@ class ModelConfig:
     backend: str = "transformers"
     quantization: str = "4bit"
     max_new_tokens: int = 256
+    max_prompt_chars: int = 8000
 
 
 @dataclass
@@ -152,6 +153,8 @@ def load_config(agent_dir: Path) -> AgentConfig:
         )
     if not isinstance(model.max_new_tokens, int) or model.max_new_tokens <= 0:
         raise ConfigError("model.max_new_tokens must be a positive integer")
+    if not isinstance(model.max_prompt_chars, int) or model.max_prompt_chars < 1000:
+        raise ConfigError("model.max_prompt_chars must be an integer of at least 1000")
 
     compartments = raw.get("compartments", ["private", "shared"])
     if not isinstance(compartments, list) or not compartments:

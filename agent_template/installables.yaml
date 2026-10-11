@@ -8,10 +8,14 @@
 
 tools:
   # ── From the internet (MCP servers) ──────────────────────────────────────────────────
-  # web:                                   # read web pages (needs nothing extra)
-  #   mcp: [python, -m, mcp_server_fetch]
-  #   pip: mcp-server-fetch
-  #   actions: [fetch]
+  # web:                                   # search the web and read pages (DuckDuckGo; needs nothing extra)
+  #   mcp: [python, -m, duckduckgo_mcp_server.server]
+  #   pip: duckduckgo-mcp-server==0.6.1    # 0.7+ needs mcp 2.x
+  #   actions: [search, fetch_content]
+  #   fixed_args: {max_results: 5}
+  #   describe:
+  #     search: Search the web. Returns titles, links and short summaries of pages
+  #     fetch_content: Read the text of a web page, given its URL
   #   compartment: shared                  # web pages aren't private data
 
   # files:                                 # read/write files, only inside {agent}/workspace (needs Node.js)

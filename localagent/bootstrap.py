@@ -34,6 +34,7 @@ def build_services(config: AgentConfig, backend: Backend | None = None, *,
         backend = create_backend(config.model.backend)
         backend.load(config.model.id, config.model.quantization)
     agent = Agent(backend, tools, model_id=config.model.id, max_new_tokens=config.model.max_new_tokens,
+                  max_prompt_chars=config.model.max_prompt_chars,
                   history_turns=config.history_turns)
     setup_connections(connections, config.installables.connections, data_root, config=config,
                       protocol=protocol, agent=agent, tools=tools, notifier=notifier)
