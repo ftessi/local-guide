@@ -75,3 +75,57 @@ def test_identity(tmp_path):
     with pytest.raises(FileExistsError):
         generate_identity(tmp_path / "identity")
     assert load_agent_id(tmp_path / "missing") is None
+
+
+SECRET_YAML = "- about: the shared secret\n  answer: The shared secret is GREEN-LANTERN-7.\n"
+
+
+def demo_dir(tmp_path):
+    src = tmp_path / "training/demo/sources"
+    src.mkdir(parents=True)
+    (src / "secret.yaml").write_text(SECRET_YAML, encoding="utf-8")
+    return tmp_path
+
+
+def demo_proto(agent_dir):
+    return Protocol.for_agent(agent_dir, ["private", "demo"], tools={}, owner_secret="t")
+
+
+def test_sources_are_read_for_training_only(tmp_path):
+    p = demo_proto(demo_dir(tmp_path))
+    assert p.training_sources("demo") == [("secret.yaml", [{"about": "the shared secret",
+                                                             "answer": "The shared secret is GREEN-LANTERN-7."}])]
+    assert p.training_sources("private") == []
+    owner = p.open_owner_session("t")
+    assert "GREEN-LANTERN-7" not in json.dumps([i.content for i in owner.context()])
+
+
+def test_sources_errors(tmp_path):
+    p = demo_proto(demo_dir(tmp_path))
+    (tmp_path / "training/demo/sources/broken.yaml").write_text("- about: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="broken.yaml"):
+        p.training_sources("demo")
+    with pytest.raises(ValueError, match="nope"):
+        p.training_sources("nope")
+
+
+def test_replacing_examples_never_appends(tmp_path):
+    p = demo_proto(tmp_path)
+    p.replace_training_examples("demo", [{"messages": [{"role": "user", "content": "OLD"}]}])
+    p.replace_training_examples("demo", [{"messages": [{"role": "user", "content": "NEW"}]}])
+    text = (tmp_path / "training/demo/examples.jsonl").read_text(encoding="utf-8")
+    assert "NEW" in text and "OLD" not in text and text.count("\n") == 1
+    with pytest.raises(ValueError):
+        p.replace_training_examples("peer:x", [])
+
+
+def test_adapter_path(tmp_path):
+    assert demo_proto(tmp_path).adapter_path("Qwen/Qwen2.5-1.5B-Instruct", "demo") == \
+        tmp_path / "training/adapters/Qwen--Qwen2.5-1.5B-Instruct/demo"
+
+
+def test_prompt_texts():
+    from localagent.agent.prompt import BASE_PROMPT
+    from localagent.protocol.prompts import OWNER_BASE_PROMPT, PEER_SYSTEM_PROMPT, REFUSAL
+    assert REFUSAL == "I can't share that."
+    assert PEER_SYSTEM_PROMPT.endswith(REFUSAL) and BASE_PROMPT == OWNER_BASE_PROMPT

@@ -166,3 +166,26 @@ class Vault:
         if compartment not in self.compartments:
             raise ValueError(f"Training examples must go to a configured compartment, not '{compartment}'")
         self._append_jsonl(self.root / "training" / compartment / "examples.jsonl", list(examples))
+
+    def read_sources(self, compartment: str) -> list[tuple[str, object]]:
+        """training/<c>/sources/*.yaml, parsed. Train-only: nothing ever reads these into a prompt."""
+        if compartment not in self.compartments:
+            raise ValueError(f"Unknown compartment '{compartment}'")
+        folder = self.root / "training" / compartment / "sources"
+        found = []
+        for f in sorted(folder.glob("*.yaml")) if folder.is_dir() else []:
+            try:
+                found.append((f.name, yaml.safe_load(f.read_text(encoding="utf-8"))))
+            except yaml.YAMLError as e:
+                raise ValueError(f"training/{compartment}/sources/{f.name} is not valid YAML: {e}") from e
+        return found
+
+    def replace_training_examples(self, compartment: str, examples: list[dict]) -> None:
+        """Generated examples replace the old ones: appending would train on stale copies of changed sources."""
+        if compartment not in self.compartments:
+            raise ValueError(f"Training examples must go to a configured compartment, not '{compartment}'")
+        path = self.root / "training" / compartment / "examples.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in examples), encoding="utf-8")
+        tmp.replace(path)

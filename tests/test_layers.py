@@ -6,7 +6,7 @@ ALLOWED = {
     "runtime": (),
     "vault": (),
     "protocol": ("localagent.vault",),
-    "agent": ("localagent.protocol.session", "localagent.runtime.base"),
+    "agent": ("localagent.protocol.session", "localagent.protocol.prompts", "localagent.runtime.base"),
     "training": ("localagent.protocol", "localagent.runtime"),
     "connect": ("localagent.protocol", "localagent.agent", "localagent.runtime"),
 }

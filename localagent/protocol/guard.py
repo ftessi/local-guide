@@ -4,7 +4,7 @@ from pathlib import Path
 
 from localagent.protocol.audit import Audit
 from localagent.protocol.policy import Policy, load_policy
-from localagent.protocol.session import Session
+from localagent.protocol.session import Session, model_slug
 from localagent.vault.store import Vault
 
 OWNER_MEMORY = "private"
@@ -54,3 +54,12 @@ class Protocol:
             raise ValueError(f"Training sets exist only for configured compartments "
                              f"{self.vault.compartments}, not '{compartment}'")
         return [i.content for i in self.vault.read("training", [compartment]) if i.compartment == compartment]
+
+    def training_sources(self, compartment: str) -> list[tuple[str, object]]:
+        return self.vault.read_sources(compartment)
+
+    def replace_training_examples(self, compartment: str, examples: list[dict]) -> None:
+        self.vault.replace_training_examples(compartment, examples)
+
+    def adapter_path(self, model_id: str, compartment: str) -> Path:
+        return self.adapters_dir / model_slug(model_id) / compartment

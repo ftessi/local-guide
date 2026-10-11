@@ -4,7 +4,7 @@ The wording is tuned against real small models: scripts/tool_eval.py measures it
 import json
 from datetime import datetime, timedelta
 
-BASE_PROMPT = "You are a helpful local AI assistant running on your owner's own computer."
+from localagent.protocol.prompts import OWNER_BASE_PROMPT as BASE_PROMPT  # shared with training examples
 
 TOOLS_INTRO = """You can use tools. They are real and they work: when a request needs one, use it instead of saying you can't.
 To use one, write one short sentence for the user, then the tool tag on its own line.
