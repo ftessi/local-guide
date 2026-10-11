@@ -34,15 +34,17 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from localagent.agent.prompt import build_system_prompt
 from localagent.config import load_config, resolve_agent_dir
-from localagent.extensions import extension_root, load_tools
+from localagent.extensions import close_tools, load_tools
 from localagent.protocol.session import ToolView
 
 
 def tool_views(data_dir) -> list:
     """The prompt as your agent sees it: with the tools listed in its installables.yaml."""
     cfg = load_config(resolve_agent_dir(None))
-    tools = load_tools(cfg.installables.tools, extension_root(cfg), data_dir, None, cfg.compartments)
-    return [ToolView(name, tool.actions) for name, tool in tools.items()]
+    tools = load_tools(cfg.installables.tools, cfg.agent_dir, data_dir, None, cfg.compartments)
+    views = [ToolView(name, tool.actions) for name, tool in tools.items()]
+    close_tools(tools)
+    return views
 
 QUESTIONS = [
     "What is the capital of France? Answer in one sentence.",

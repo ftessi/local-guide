@@ -11,6 +11,7 @@ Follow the pages in order:
 | 3 | [Create your agent](03-create-your-agent.md) | Your own `my-agent/` folder with a model picked for your hardware |
 | 4 | [Run it, then reach it from your phone](04-run-and-phone.md) | Chat in the terminal and on your phone, with reminders |
 | 5 | [Teach it](05-teach-it.md) | Knowledge, compartments, tools |
+| 5b | [Give it abilities](05b-give-it-abilities.md) | It can read web pages, write files and run commands |
 | 6 | [Train it](06-train-it.md) | *Coming later*: your own fine-tuned adapters |
 | 7 | [Connect to others](07-connect-to-others.md) | *Coming later*: agent-to-agent connections |
 

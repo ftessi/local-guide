@@ -1,7 +1,7 @@
 import pytest
 from dotenv import dotenv_values
 
-from localagent.config import DEFAULT_EXTENSIONS_SOURCE, load_config
+from localagent.config import load_config
 from localagent.setup_agent import create_agent
 
 
@@ -14,10 +14,9 @@ def test_create_agent(tmp_path):
     assert len(dotenv_values(d / ".env")["AGENT_SECRET"]) == 64
     assert (d / "identity/agent.pub").read_text().strip() == agent_id
     assert (d / "knowledge/private").is_dir() and (d / "knowledge/shared").is_dir()
-    # The template starts with the calendar and the phone app, from the shared extensions repo
-    assert cfg.installables.source == DEFAULT_EXTENSIONS_SOURCE
-    assert cfg.installables.tools == {"calendar": {"compartment": "private"}}
-    assert set(cfg.installables.connections) == {"phone"}
+    # The template is a menu of commented examples: nothing is installed until the owner opts in
+    assert cfg.installables.tools == {} and cfg.installables.connections == {}
+    assert "mcp_server_fetch" in (d / "installables.yaml").read_text(encoding="utf-8")
 
 
 def test_create_agent_refuses_existing(tmp_path):

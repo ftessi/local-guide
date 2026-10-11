@@ -13,7 +13,10 @@ pyyaml>=6.0
 cryptography>=42
 python-dotenv>=1.0.0
 
+# Tools from the internet: runs MCP servers (docs/guide/05b-give-it-abilities.md)
+mcp>=1.20,<2
+
 # Tests
 pytest>=8.0
 
-# Tools and connections bring their own requirements.txt; `python -m localagent install` installs them.
+# Your own tools/connections bring their own requirements.txt; `python -m localagent install` installs them.

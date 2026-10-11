@@ -37,13 +37,16 @@ Listed in `installables.yaml` (then `python -m localagent install`):
 ```yaml
 tools:
   calendar:
-    compartment: private   # whose data the reminders are
+    source: W:/my-tools/calendar   # where its code is
+    compartment: private           # whose data the reminders are
 ```
 
 The model calls tools by writing a tag at the end of its reply. You never see the tag, only the result. Try: *"remind me to call mom tomorrow at 6pm"*, then *"what reminders do I have?"*.
 
-`python -m localagent list` shows the tools available. Writing a new one is a small Python package in the extensions repo; see the [README](../../README.md#writing-a-new-tool).
+**Web, files, terminal and thousands of other ready-made tools:** next page, [5b. Give it abilities](05b-give-it-abilities.md). Writing your own tool is a small Python package; see the [README](../../README.md#writing-your-own-tool).
 
 ## Who sees what
 
 `policy.yaml` decides it. You (`owner: [all]`) see everything. What other agents can see is covered in page 7.
+
+Next: [5b. Give it abilities](05b-give-it-abilities.md)

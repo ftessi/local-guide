@@ -6,12 +6,12 @@ from datetime import datetime, timedelta
 
 BASE_PROMPT = "You are a helpful local AI assistant running on your owner's own computer."
 
-TOOLS_INTRO = """You can use tools. To use one, write one short sentence for the user, then the tool tag on its own line.
+TOOLS_INTRO = """You can use tools. They are real and they work: when a request needs one, use it instead of saying you can't.
+To use one, write one short sentence for the user, then the tool tag on its own line.
 The tag is JSON inside <tool>...</tool>, with "name", "action" and "args". Nothing comes after the tag.
 
-Example: if the user says "{request}", your whole reply is these two lines:
-Sure, one moment.
-{tag}
+Examples of complete replies:
+{examples}
 
 If no tool is needed, just answer normally with no tag.
 Arguments: use exactly the names listed. Dates and times are ISO 8601 (2026-10-12T18:00:00).
@@ -19,16 +19,17 @@ After a "read" action you will receive the result and can then answer with the r
 
 Available tools:"""
 
-_SAMPLE = {"str": "...", "int": 1, "iso-datetime": "2026-10-12T18:00:00"}
+_SAMPLE = {"str": "...", "int": 1, "number": 1, "bool": True, "list": [], "object": {},
+           "iso-datetime": "2026-10-12T18:00:00"}
 
 
-def _example(view) -> dict:
-    """A worked example built from the agent's own tool, so the prompt stays tool-agnostic.
+def _example(view) -> str:
+    """One worked example per tool, built from the tool's own first action, so the prompt stays tool-agnostic.
     It must be concrete: given a placeholder, small models copy the placeholder."""
     action_name, action = next(iter(view.actions.items()))
-    args = {p: _SAMPLE.get(t, "...") for p, t in action.params.items()}
-    return {"request": f"{action.description}, please.",
-            "tag": f"<tool>{json.dumps({'name': view.name, 'action': action_name, 'args': args})}</tool>"}
+    args = {p: _SAMPLE.get(t, "...") for p, t in action.params.items() if p not in action.optional}
+    tag = json.dumps({"name": view.name, "action": action_name, "args": args}, ensure_ascii=False)
+    return f'- If the user says "{action.description.rstrip(".")}, please.":\nSure, one moment.\n<tool>{tag}</tool>'
 
 
 def _dates(now: datetime) -> str:
@@ -40,13 +41,15 @@ def _dates(now: datetime) -> str:
 
 def build_system_prompt(items: list, tools: list, now: datetime) -> str:
     sections = [BASE_PROMPT, _dates(now)]
+    tools = [view for view in tools if view.actions]
     if tools:
-        lines = [TOOLS_INTRO.format(**_example(tools[0]))]
+        lines = [TOOLS_INTRO.format(examples="\n".join(_example(view) for view in tools))]
         for view in tools:
             for action_name, action in view.actions.items():
-                params = ", ".join(f'"{p}": <{t}>' for p, t in action.params.items())
+                params = ", ".join(f'"{p}": <{t}{", optional" if p in action.optional else ""}>'
+                                   for p, t in action.params.items())
                 lines.append(f'- name "{view.name}", action "{action_name}" ({action.kind}): '
-                             f"{action.description}. args: {{{params}}}")
+                             f"{action.description.rstrip('.')}. args: {{{params}}}")
         sections.append("\n".join(lines))
     knowledge = [i.content for i in items if i.kind == "knowledge"]
     if knowledge:

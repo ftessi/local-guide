@@ -7,7 +7,7 @@ from localagent.extensions import load_tools
 from localagent.protocol.guard import Protocol
 from localagent.protocol.scopes import Scope
 from localagent.runtime.base import AdapterLoadError
-from tests.fakes import FAKE_EXTENSIONS, FakeBackend
+from tests.fakes import NOTES_SOURCE, FakeBackend
 
 CREATE = ('<tool>{"name":"notes","action":"add",'
           '"args":{"text":"Dentist","due":"2030-01-01T10:00:00"}}</tool>')
@@ -19,7 +19,7 @@ NOW = datetime(2026, 10, 11, 9, 30)
 def env(tmp_path):
     (tmp_path / "knowledge/private").mkdir(parents=True)
     (tmp_path / "knowledge/private/me.md").write_text("Owner is called Ana.")
-    tools = load_tools({"notes": {}}, FAKE_EXTENSIONS, tmp_path / "data", None, ["private", "shared"])
+    tools = load_tools({"notes": {"source": NOTES_SOURCE}}, tmp_path, tmp_path / "data", None, ["private", "shared"])
     proto = Protocol.for_agent(tmp_path, ["private", "shared"], tools, owner_secret="t")
     return tmp_path, tools, proto
 
@@ -153,3 +153,42 @@ def test_read_round_replayed_without_tool_results(env):
     assert "Tool results" not in history[1]["content"]
     record = session.vault.read("memory", ["private"])[0].content
     assert record["transcript"][1]["content"].startswith("Tool results")  # kept in memory for training
+
+
+ADD_NOTE = '<tool>{"name":"notes","action":"add","args":{"text":"rm -rf","due":"2030-01-01T10:00:00"}}</tool>'
+
+
+def test_confirm_tool_waits_for_yes(env):
+    _, tools, proto = env
+    tools["notes"].confirm = True
+    agent, backend = make_agent(tools, ["Sure. " + ADD_NOTE, "Saved it."])
+    session = proto.open_owner_session("t")
+    first = agent.respond(session, "save a note")
+    assert tools["notes"].notes == []  # nothing ran yet
+    assert "notes.add" in first and '"rm -rf"' in first and "yes" in first
+    second = agent.respond(session, "Yes")
+    assert [n["text"] for n in tools["notes"].notes] == ["rm -rf"]
+    assert second == "Saved it."
+    assert backend.calls[1][-1]["content"].startswith("I allowed it. Tool results")
+
+
+def test_confirm_tool_dropped_on_anything_else(env):
+    _, tools, proto = env
+    tools["notes"].confirm = True
+    agent, backend = make_agent(tools, [ADD_NOTE, "Ok, I won't.", "Fine."])
+    session = proto.open_owner_session("t")
+    agent.respond(session, "save a note")
+    assert agent.respond(session, "no, don't") == "Ok, I won't."
+    assert backend.calls[1][-1]["content"] == "no, don't"
+    agent.respond(session, "yes")  # nothing pending any more
+    assert tools["notes"].notes == []
+
+
+def test_confirmation_still_goes_through_the_guard(env):
+    _, tools, proto = env
+    tools["notes"].confirm = True
+    agent, _ = make_agent(tools, [ADD_NOTE, "x"])
+    limited = proto._session("peer:x", Scope(["tool:notes:list"]), "peer:x")
+    agent.respond(limited, "save a note")
+    reply = agent.respond(limited, "yes")
+    assert tools["notes"].notes == [] and "Couldn't run notes.add" in reply

@@ -1,6 +1,6 @@
 # Architecture
 
-One shared core (`localagent/`), installable tools and connections in a separate repo ([`local-guide-extensions`](https://github.com/ftessi/local-guide-extensions)), and one personal folder per agent (`my-agent/`, gitignored). The model is swappable; everything else stays the same. The repo map and how-tos are in the [README](../README.md).
+One shared core (`localagent/`), tools and connections installed per agent from wherever they live (MCP servers from the internet, or your own folders/git repos), and one personal folder per agent (`my-agent/`, gitignored). The model is swappable; everything else stays the same. The repo map and how-tos are in the [README](../README.md).
 
 Design spec: [`design/2026-10-11-ecosystem-restructure-design.md`](design/2026-10-11-ecosystem-restructure-design.md).
 
@@ -29,7 +29,7 @@ runtime/     the model behind one interface
 
 `tests/test_layers.py` fails if any import breaks these rules. Outside the layers: `config.py` (reads `agent.yaml`, `installables.yaml`, `.env`), `extensions.py` and `installer.py` (find, load and install tools/connections), `bootstrap.py` (wires layers and extensions for one agent), `setup_agent.py` (creates agent folders), `testing.py` (FakeBackend), `__main__.py` (CLI).
 
-Installed tools and connections are outside the package. They may import the interfaces they implement (`localagent.agent.tools.base`, `localagent.connect.base`) and, for connections, `protocol` and `agent`, the same as the `connect` layer.
+MCP servers become tools through `agent/tools/mcp_bridge.py`: each runs as a child process, and its actions pass through the same guard as any tool. Your own tools and connections are outside the package. They may import the interfaces they implement (`localagent.agent.tools.base`, `localagent.connect.base`) and, for connections, `protocol` and `agent`, the same as the `connect` layer.
 
 ## One turn, step by step
 

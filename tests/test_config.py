@@ -1,7 +1,7 @@
 import pytest
 
-from localagent.config import DEFAULT_EXTENSIONS_SOURCE, ConfigError, load_config, resolve_agent_dir
-from tests.fakes import FAKE_EXTENSIONS, write_agent_yaml
+from localagent.config import ConfigError, load_config, resolve_agent_dir
+from tests.fakes import NOTES_SOURCE, write_agent_yaml
 
 
 def test_load_defaults_and_values(tmp_path):
@@ -10,8 +10,7 @@ def test_load_defaults_and_values(tmp_path):
     assert cfg.model.id == "fake/model"
     assert cfg.model.max_new_tokens == 64
     assert cfg.compartments == ["private", "shared"]
-    assert cfg.installables.tools == {"notes": {}}
-    assert cfg.installables.source == FAKE_EXTENSIONS.as_posix()
+    assert cfg.installables.tools == {"notes": {"source": NOTES_SOURCE}}
     assert cfg.history_turns == 5
 
 
@@ -24,23 +23,29 @@ def test_minimal_yaml_uses_defaults(tmp_path):
 
 def test_installables_optional(tmp_path):
     cfg = load_config(write_agent_yaml(tmp_path / "a", installables=None))
-    assert cfg.installables.source == DEFAULT_EXTENSIONS_SOURCE and cfg.installables.ref == "main"
     assert cfg.installables.tools == {} and cfg.installables.connections == {}
 
 
 def test_installables_values(tmp_path):
-    text = "source: ../ext\nref: v1\ntools:\n  calendar:\n    compartment: shared\nconnections:\n  phone:\n"
-    cfg = load_config(write_agent_yaml(tmp_path / "a", installables=text))
-    assert (cfg.installables.source, cfg.installables.ref) == ("../ext", "v1")
-    assert cfg.installables.tools == {"calendar": {"compartment": "shared"}}
-    assert cfg.installables.connections == {"phone": {}}
+    text = ("tools:\n  calendar:\n    source: ../tools/calendar\n    compartment: shared\n"
+            "  files:\n    mcp: npx -y server-filesystem {agent}/workspace\n    cwd: '{agent}/workspace'\n"
+            "connections:\n  phone:\n    source: https://example.com/phone.git\n    ref: v1\n")
+    d = write_agent_yaml(tmp_path / "a", installables=text)
+    cfg = load_config(d)
+    agent = d.resolve().as_posix()
+    assert cfg.installables.tools["calendar"] == {"source": "../tools/calendar", "compartment": "shared"}
+    assert cfg.installables.tools["files"] == {"mcp": ["npx", "-y", "server-filesystem", f"{agent}/workspace"],
+                                               "cwd": f"{agent}/workspace"}
+    assert cfg.installables.connections == {"phone": {"source": "https://example.com/phone.git", "ref": "v1"}}
 
 
 @pytest.mark.parametrize("text, fragment", [
     ("tools: [calendar]\n", "must map"),
-    ("tools:\n  Calendar:\n", "Calendar"),
-    ("connections:\n  phone: yes\n", "phone"),
-    ("sorce: x\n", "sorce"),
+    ("tools:\n  Calendar:\n    source: x\n", "Calendar"),
+    ("tools:\n  calendar:\n    compartment: private\n", "needs `source:`"),
+    ("connections:\n  phone:\n    mcp: [x]\n", "needs `source:`"),
+    ("tools:\n  web:\n    mcp: [python, 3]\n", "list of words"),
+    ("source: x\n", "source"),
     ("tools: [unclosed\n", "not valid YAML"),
 ])
 def test_invalid_installables_rejected(tmp_path, text, fragment):

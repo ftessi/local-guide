@@ -1,17 +1,37 @@
-# What your agent uses beyond the core. The code is NOT in this repo: it comes from `source`.
-# After editing, run:  python -m localagent install      (see what exists: python -m localagent list)
-# Remove a block to disable it. Settings under a name are passed to that tool/connection.
-
-source: https://github.com/ftessi/local-guide-extensions.git   # or a local folder while you develop one
-ref: main                                                       # branch or tag of the source
+# What your agent can use beyond chatting: tools (things it can do) and connections (ways to reach it).
+# Nothing here is part of the repo. Each entry says where it comes from:
+#   source: a folder or git URL with your own (or a friend's) tool/connection code
+#   mcp:    a command that runs an MCP server (tools only): ready-made tools from the internet
+# Uncomment what you want, then run:   python -m localagent install
+# Guide: docs/guide/05-teach-it.md. Writing your own: README.md §4.
+# "{agent}" is replaced by this folder's path.
 
 tools:
-  calendar:
-    compartment: private         # whose data the reminders are (see policy.yaml)
+  # ── From the internet (MCP servers) ──────────────────────────────────────────────────
+  # web:                                   # read web pages (needs nothing extra)
+  #   mcp: [python, -m, mcp_server_fetch]
+  #   pip: mcp-server-fetch
+  #   actions: [fetch]
+  #   compartment: shared                  # web pages aren't private data
 
-connections:
-  phone:                         # web app for your phone/PC, with push notifications
-    host: 127.0.0.1              # keep local; reach it from outside with the cloudflare connection
-    port: 8000
-  # cloudflare:                  # public HTTPS address for the phone app (needs cloudflared set up)
-  #   tunnel: local-agent
+  # files:                                 # read/write files, only inside {agent}/workspace (needs Node.js)
+  #   mcp: [npx, -y, "@modelcontextprotocol/server-filesystem", "{agent}/workspace"]
+  #   cwd: "{agent}/workspace"
+  #   actions: [list_directory, read_text_file, write_file, create_directory]
+
+  # terminal:                              # run commands, starting in {agent}/workspace (needs Node.js)
+  #   mcp: [npx, -y, wcli0, --shell, powershell, --allowedDir, "{agent}/workspace"]
+  #   cwd: "{agent}/workspace"
+  #   actions: [execute_command]
+  #   fixed_args: {shell: powershell}
+  #   confirm: true                        # NOT a sandbox: a command can reach any folder. Keep this on.
+
+  # ── Your own code ────────────────────────────────────────────────────────────────────
+  # calendar:
+  #   source: ../my-tools/calendar         # a folder (relative to this one), or a git URL
+  #   compartment: private
+
+connections: {}
+  # phone:                                 # chat app for your phone + push notifications
+  #   source: ../my-tools/phone
+  #   port: 8000

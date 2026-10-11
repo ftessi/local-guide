@@ -2,6 +2,7 @@
 import json
 import logging
 import threading
+import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Generator, Iterator
@@ -14,6 +15,7 @@ from localagent.runtime.base import Backend
 
 log = logging.getLogger(__name__)
 MAX_ROUNDS = 2
+YES = {"yes", "y", "ok", "okay", "allow", "si", "sí"}  # approves tools marked confirm: true
 
 
 @dataclass
@@ -30,8 +32,9 @@ class ToolOutcome:
         return {"name": self.name, "action": self.action, "ok": self.ok, "error": self.error}
 
 
-def _results_message(outcomes: list[ToolOutcome]) -> str:
-    lines = [f"{o.name}.{o.action}: {json.dumps(o.result, ensure_ascii=False, default=str)}" for o in outcomes]
+def _results_message(outcomes: list[ToolOutcome], include_failed: bool = False) -> str:
+    lines = [f"{o.name}.{o.action}: {json.dumps(o.result, ensure_ascii=False, default=str)}" if o.ok
+             else f"{o.name}.{o.action}: failed: {o.error}" for o in outcomes if o.ok or include_failed]
     return "Tool results (use them to answer my previous message):\n" + "\n".join(lines)
 
 
@@ -53,6 +56,7 @@ class Agent:
         self.history_turns = history_turns
         self._clock = clock
         self._lock = threading.Lock()  # one model: one turn at a time
+        self._pending = weakref.WeakKeyDictionary()  # session -> tool calls waiting for the owner's yes
 
     def run_tool(self, session: Session, name: str, action: str, args: dict) -> ToolOutcome:
         try:
@@ -84,12 +88,24 @@ class Agent:
         """Yields visible text as it is generated; returns the reply that was recorded to memory."""
         with self._lock:
             self.backend.set_adapters(session.adapters(self.model_id))
+            # texts: what the user sees. transcript: what the model said and was told, replayed as history.
+            texts, transcript, outcomes, shown, spoke = [], [], [], False, False
+            to_model = user_message
+            pending = self._pending.pop(session, None)
+            if pending and user_message.strip().lower().rstrip(".!") in YES:
+                approved = [self.run_tool(session, c.name, c.action, c.args) for c in pending]
+                outcomes += approved
+                to_model = "I allowed it. " + _results_message(approved, include_failed=True)
+                failed = [o for o in approved if not o.ok]
+                if failed:
+                    notice = "\n".join(f"(Couldn't run {o.name}.{o.action}: {o.error})" for o in failed)
+                    yield notice
+                    shown = True
+                    texts.append(notice)
             system = build_system_prompt(session.context(), session.tools(), self._clock())
             messages = ([{"role": "system", "content": system}]
                         + session.history(self.history_turns)
-                        + [{"role": "user", "content": user_message}])
-            # texts: what the user sees. transcript: what the model said and was told, replayed as history.
-            texts, transcript, outcomes, shown, spoke = [], [], [], False, False
+                        + [{"role": "user", "content": to_model}])
             for round_no in range(1, MAX_ROUNDS + 1):
                 if round_no > 1 and shown:
                     yield "\n\n"
@@ -116,9 +132,19 @@ class Agent:
                         log.warning("Ignored %d tool call(s) in the final round", len(calls))
                     transcript.append({"role": "assistant", "content": said})
                     break
+                held = [c for c in calls if getattr(self.tools.get(c.name), "confirm", False)]
+                calls = [c for c in calls if c not in held]
                 round_outcomes = [self.run_tool(session, c.name, c.action, c.args) for c in calls]
                 outcomes += round_outcomes
                 transcript.append({"role": "assistant", "content": _canonical(said, calls, round_outcomes)})
+                if held:  # tools marked `confirm: true` wait for the owner's explicit yes, next message
+                    self._pending[session] = held
+                    notice = "\n".join(
+                        f"(Waiting for your OK to run {c.name}.{c.action} "
+                        f"{json.dumps(c.args, ensure_ascii=False)}. Reply yes to run it.)" for c in held)
+                    yield ("\n\n" if shown else "") + notice
+                    shown = True
+                    texts.append(notice)
                 failed = [o for o in round_outcomes if not o.ok]
                 if failed:
                     notice = "\n".join(f"(Couldn't run {o.name}.{o.action}: {o.error})" for o in failed)

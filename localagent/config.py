@@ -13,7 +13,6 @@ QUANTIZATIONS = ("4bit", "fp16", "none")
 COMPARTMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 TOP_LEVEL_KEYS = {"name", "model", "compartments", "memory"}
 EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-DEFAULT_EXTENSIONS_SOURCE = "https://github.com/ftessi/local-guide-extensions.git"
 
 
 class ConfigError(Exception):
@@ -30,9 +29,9 @@ class ModelConfig:
 
 @dataclass
 class Installables:
-    """What the agent uses beyond the core, from installables.yaml. Presence in the file = enabled."""
-    source: str = DEFAULT_EXTENSIONS_SOURCE  # git URL, or a local folder (relative to the agent folder)
-    ref: str = "main"
+    """What the agent uses beyond the core, from installables.yaml. Listed = enabled.
+    Each entry has `source:` (a folder or git URL with Tool/Connection code) or, for tools, `mcp:` (a command
+    that runs an MCP server). Any "{agent}" in a value is replaced by the agent folder's path."""
     tools: dict[str, dict] = field(default_factory=dict)
     connections: dict[str, dict] = field(default_factory=dict)
 
@@ -74,19 +73,34 @@ def _section(raw: dict, key: str) -> dict:
     return value
 
 
-def _extensions(raw, kind: str) -> dict[str, dict]:
+def _expand(value, agent_dir: Path):
+    if isinstance(value, str):
+        return value.replace("{agent}", Path(agent_dir).resolve().as_posix())
+    if isinstance(value, list):
+        return [_expand(v, agent_dir) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand(v, agent_dir) for k, v in value.items()}
+    return value
+
+
+def _extensions(raw, kind: str, agent_dir: Path) -> dict[str, dict]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
         raise ConfigError(f"'{kind}' in installables.yaml must map names to settings")
+    where = "`source:` (a folder or git URL)" + (" or `mcp:` (a command that runs an MCP server)"
+                                                 if kind == "tools" else "")
     result = {}
     for name, value in raw.items():
         if not isinstance(name, str) or not EXTENSION_NAME_RE.match(name):
             raise ConfigError(f"Invalid {kind[:-1]} name '{name}' in installables.yaml")
-        if value is None:
-            value = {}
-        if not isinstance(value, dict):
-            raise ConfigError(f"{kind}.{name} in installables.yaml must be a mapping of settings (or empty)")
+        if not isinstance(value, dict) or not (value.get("source") or (kind == "tools" and value.get("mcp"))):
+            raise ConfigError(f"{kind}.{name} in installables.yaml needs {where}")
+        value = _expand(value, agent_dir)
+        if isinstance(value.get("mcp"), str):
+            value["mcp"] = value["mcp"].split()
+        if "mcp" in value and not all(isinstance(a, str) for a in value["mcp"]):
+            raise ConfigError(f"tools.{name}.mcp must be a command: a list of words, e.g. [npx, -y, some-server]")
         result[name] = value
     return result
 
@@ -101,13 +115,12 @@ def load_installables(agent_dir: Path) -> Installables:
         raise ConfigError(f"installables.yaml is not valid YAML: {e}") from e
     if not isinstance(raw, dict):
         raise ConfigError("installables.yaml must be a mapping of settings")
-    unknown = set(raw) - {"source", "ref", "tools", "connections"}
+    unknown = set(raw) - {"tools", "connections"}
     if unknown:
-        raise ConfigError(f"Unknown setting(s) in installables.yaml: {', '.join(sorted(unknown))}")
-    return Installables(source=str(raw.get("source") or DEFAULT_EXTENSIONS_SOURCE),
-                        ref=str(raw.get("ref") or "main"),
-                        tools=_extensions(raw.get("tools"), "tools"),
-                        connections=_extensions(raw.get("connections"), "connections"))
+        raise ConfigError(f"Unknown setting(s) in installables.yaml: {', '.join(sorted(unknown))} "
+                          "(only tools: and connections:; each entry has its own source: or mcp:)")
+    return Installables(tools=_extensions(raw.get("tools"), "tools", agent_dir),
+                        connections=_extensions(raw.get("connections"), "connections", agent_dir))
 
 
 def load_config(agent_dir: Path) -> AgentConfig:
