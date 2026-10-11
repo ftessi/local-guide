@@ -35,18 +35,18 @@ def main() -> int:
     batches = [tokenize_example(tokenizer, m, DEFAULTS["max_tokens"]) for m in examples]
     dtype = torch.float16 if args.device == "cuda" else torch.float32
     print(f"Loading {cfg.model.id} on {args.device} ({dtype})...")
-    model = AutoModelForCausalLM.from_pretrained(cfg.model.id, dtype=dtype).to(args.device)
-    model.gradient_checkpointing_enable()
-    model.enable_input_require_grads()
-    model.config.use_cache = False
-    model = add_lora(model, rank=DEFAULTS["rank"], alpha=DEFAULTS["alpha"], dropout=DEFAULTS["dropout"])
-    if args.device == "cuda":
-        torch.cuda.reset_peak_memory_stats()
-        free, total = torch.cuda.mem_get_info()
-        print(f"GPU after load: {torch.cuda.memory_allocated() / 2**20:.0f} MiB allocated, "
-              f"{free / 2**20:.0f} of {total / 2**20:.0f} MiB free")
-    start = time.time()
     try:
+        model = AutoModelForCausalLM.from_pretrained(cfg.model.id, dtype=dtype).to(args.device)
+        model.gradient_checkpointing_enable()
+        model.enable_input_require_grads()
+        model.config.use_cache = False
+        model = add_lora(model, rank=DEFAULTS["rank"], alpha=DEFAULTS["alpha"], dropout=DEFAULTS["dropout"])
+        if args.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+            free, total = torch.cuda.mem_get_info()
+            print(f"GPU after load: {torch.cuda.memory_allocated() / 2**20:.0f} MiB allocated, "
+                  f"{free / 2**20:.0f} of {total / 2**20:.0f} MiB free")
+        start = time.time()
         losses = train_loop(model, batches, epochs=args.epochs, learning_rate=DEFAULTS["learning_rate"],
                             device=args.device)
     except torch.OutOfMemoryError:
