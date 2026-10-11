@@ -9,7 +9,7 @@ Design spec: [`design/2026-10-11-ecosystem-restructure-design.md`](design/2026-1
 ```
 connect/     transports: terminal built in; phone app, tunnel, agent↔agent network installed
    │
-protocol/    THE GUARD: labels, scopes, policy, sessions, handshake, audit
+protocol/    THE GUARD: labels, scopes, policy, sessions, audit
    │
    ├──► agent/      chat loop + tools; sees only what a session gives it
    ├──► training/   builds datasets only through protocol, trains per compartment

@@ -30,7 +30,10 @@ only what you chose to share with that party, trained into that connection's ada
 A Tessera-facing agent checks its own folder before it starts. The folder may contain only: `agent.yaml`,
 `installables.yaml`, `policy.yaml`, `.env`, `README.md`, `audit.log`, `identity/`, `data/tessera/`, `tessera/`,
 `memory/peer__*/`, and its one exported adapter under `training/adapters/`. Anything else (hidden files, other
-adapters, sources, conversations, knowledge, work) stops it from starting. `serve` on such an agent requires its
+adapters, sources, conversations, any file in `knowledge/` or `work/`, which must stay empty) stops it from
+starting, and so does a symlink or junction anywhere in the folder, an exported adapter whose `adapter.json`
+doesn't name this connection's compartment and this agent's model, or a missing exported adapter (without it a peer
+would reach the bare model). `serve` on such an agent requires its
 only connection to be `tessera`, and `chat` is refused on it. Each further connection gets its own folder, id and
 port (`tessera-acme/` on 8101...). Ideally they run on their own machine.
 
@@ -50,3 +53,10 @@ port (`tessera-acme/` on 8101...). Ideally they run on their own machine.
 - Every message both ways is signed and chained; both sides keep the same record in `tessera/`.
 - Plain HTTP on your local network is for testing: use HTTPS (e.g. the Cloudflare tunnel) across the internet.
   The content isn't encrypted end to end until Tessera v0.2.
+
+## Known v0.1 limitations
+
+- No rate limiting: a stranger can make `tessera/requests.jsonl` grow by connecting with many fresh keys.
+- No TLS built in: put it behind HTTPS (a tunnel or reverse proxy) when it crosses the internet.
+- The requester's record may contain a final ask the responder rejected: error replies are outside the chain,
+  so the two records can differ by that last ask.

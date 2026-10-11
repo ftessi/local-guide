@@ -31,3 +31,6 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# ── Subagent-driven-development working files ─────────
+.superpowers/
