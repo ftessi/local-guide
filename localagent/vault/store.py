@@ -177,11 +177,6 @@ class Vault:
         path = self.root / "memory" / compartment_to_folder(compartment) / f"{now:%Y-%m-%d}.jsonl"
         self._append_jsonl(path, [{"ts": now.isoformat(timespec="seconds"), **record}])
 
-    def write_training_examples(self, compartment: str, examples: list[dict]) -> None:
-        if compartment not in self.compartments:
-            raise ValueError(f"Training examples must go to a configured compartment, not '{compartment}'")
-        self._append_jsonl(self.root / "training" / compartment / "examples.jsonl", list(examples))
-
     def read_sources(self, compartment: str) -> list[tuple[str, object]]:
         """training/<c>/sources/*.yaml, parsed. Train-only: nothing ever reads these into a prompt."""
         if compartment not in self.compartments:

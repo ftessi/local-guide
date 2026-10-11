@@ -1,7 +1,6 @@
 # ── Secrets — NEVER commit ─────────────────────────────
 .env
 *.pem
-push_subscriptions.json
 
 # ── Model weights (~6GB, re-downloadable from HuggingFace) ──
 models/
@@ -10,9 +9,7 @@ models/
 # Your agent folder (created by scripts/new_agent.py). Any extra agent folders: add them here.
 my-agent/
 tessera-*/
-calendar.db
 *.db
-knowledge/private/
 
 # ── Installed tools and connections (python -m localagent install) ──
 extensions/

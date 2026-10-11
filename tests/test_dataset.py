@@ -1,12 +1,6 @@
 import pytest
 
-from localagent.training.dataset import InvalidExample, make_example, validate_example
-
-
-def test_make_example():
-    ex = make_example([{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}],
-                      source="memory:x#1")
-    assert ex["source"] == "memory:x#1" and "added" in ex and validate_example(ex) == ex
+from localagent.training.dataset import InvalidExample, validate_example
 
 
 @pytest.mark.parametrize("ex", [

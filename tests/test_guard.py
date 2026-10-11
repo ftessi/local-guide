@@ -54,8 +54,8 @@ def test_private_never_in_non_private_session(agent_dir):
 
 def test_training_set_exact_compartment(agent_dir):
     v = Vault(agent_dir, ["private", "shared"])
-    v.write_training_examples("private", [{"messages": [{"role": "user", "content": "PRIV"}]}])
-    v.write_training_examples("shared", [{"messages": [{"role": "user", "content": "SHARED"}]}])
+    v.replace_training_examples("private", [{"messages": [{"role": "user", "content": "PRIV"}]}])
+    v.replace_training_examples("shared", [{"messages": [{"role": "user", "content": "SHARED"}]}])
     v.append_memory("peer:x", {"user": "PEER", "assistant": "y"})
     p = proto(agent_dir)
     blob = json.dumps(p.training_set("shared"))
