@@ -1,32 +1,28 @@
-import pytest
 from unittest.mock import patch
-from agent.push import PushDispatcher
+
+from localagent.connect.owner.push import PushDispatcher
+
+SUB = {"endpoint": "https://example.com/push/123", "keys": {"auth": "a", "p256dh": "b"}}
 
 
-@pytest.fixture
-def push(tmp_path, monkeypatch):
-    monkeypatch.setenv("VAPID_PRIVATE_KEY", "test_private")
-    monkeypatch.setenv("VAPID_PUBLIC_KEY", "test_public")
-    monkeypatch.setenv("VAPID_CLAIMS_EMAIL", "test@test.com")
-    return PushDispatcher(subs_path=str(tmp_path / "subs.json"))
+def test_register_dedup_and_persist(tmp_path):
+    p = PushDispatcher(tmp_path / "subs.json", private_key="k")
+    p.register(SUB)
+    p.register(SUB)
+    assert len(PushDispatcher(tmp_path / "subs.json").subscriptions) == 1
 
 
-def test_register_subscription(push):
-    sub = {"endpoint": "https://example.com/push/123", "keys": {"auth": "a", "p256dh": "b"}}
-    push.register(sub)
-    assert len(push.subscriptions) == 1
+def test_send_calls_webpush(tmp_path):
+    p = PushDispatcher(tmp_path / "subs.json", private_key="k", claims_email="a@b.c")
+    p.register(SUB)
+    with patch("localagent.connect.owner.push.webpush") as wp:
+        p.send("T", "B")
+    assert wp.called and wp.call_args.kwargs["vapid_claims"] == {"sub": "mailto:a@b.c"}
 
 
-def test_register_deduplicates(push):
-    sub = {"endpoint": "https://example.com/push/123", "keys": {"auth": "a", "p256dh": "b"}}
-    push.register(sub)
-    push.register(sub)
-    assert len(push.subscriptions) == 1
-
-
-def test_send_calls_webpush(push):
-    sub = {"endpoint": "https://example.com/push/123", "keys": {"auth": "a", "p256dh": "b"}}
-    push.register(sub)
-    with patch("agent.push.webpush") as mock_wp:
-        push.send("Test", "Body")
-        assert mock_wp.called
+def test_send_without_key_is_noop(tmp_path):
+    p = PushDispatcher(tmp_path / "subs.json")
+    p.register(SUB)
+    with patch("localagent.connect.owner.push.webpush") as wp:
+        p.send("T", "B")
+    assert not wp.called

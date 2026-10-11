@@ -1,0 +1,5 @@
+when,model,mode,load_s,vram_gib,devices,avg_ttft_s,avg_tok_s,avg_total_s
+2026-10-09T17:02:22,Qwen/Qwen2.5-3B-Instruct,gpu4,42.2,2.05,cuda:0,2.48,1.5,53.4
+2026-10-09T17:15:15,Qwen/Qwen2.5-1.5B-Instruct,gpu16,736.5,2.88,cuda:0,0.96,18.7,4.2
+2026-10-09T17:18:50,Qwen/Qwen2.5-3B-Instruct,offload,27.7,2.16,cuda:0 meta,4.22,0.9,48.1
+2026-10-09T17:20:28,Qwen/Qwen2.5-1.5B-Instruct,cpu,12.6,0.00,cpu,4.78,3.3,23.2

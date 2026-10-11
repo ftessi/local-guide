@@ -1,0 +1,24 @@
+# Your agent's settings. Secrets live in .env next to this file, never here.
+name: my-agent
+
+model:
+  id: Qwen/Qwen2.5-3B-Instruct   # any HuggingFace chat/instruct model id
+  backend: transformers          # transformers (NVIDIA/CPU) | llamacpp, mlx (coming later)
+  quantization: 4bit             # 4bit | fp16 | none
+  max_new_tokens: 256            # longest reply, in tokens
+
+# Data compartments. 'private' = only you. 'shared' = may be offered to connected agents.
+# Add your own (lowercase, digits, '-'), e.g. family, work.
+compartments: [private, shared]
+
+tools:
+  calendar:
+    enabled: true
+    compartment: private         # whose eyes the reminders are for
+
+memory:
+  history_turns: 20              # how many past turns the model sees each message
+
+server:
+  host: 127.0.0.1                # keep local; reach it from outside via Cloudflare Tunnel
+  port: 8000

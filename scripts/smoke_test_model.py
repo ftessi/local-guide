@@ -1,29 +1,20 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-import torch
+"""Load the agent's configured model and say hello. Usage: python scripts/smoke_test_model.py [--agent DIR]"""
+import argparse
+import sys
+from pathlib import Path
 
-model_id = "Qwen/Qwen2.5-3B-Instruct"
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-quant_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16
-)
+from localagent.config import ensure_hf_home, load_config, resolve_agent_dir  # noqa: E402
+from localagent.runtime.factory import create_backend  # noqa: E402
 
-print("Loading tokenizer...")
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-print("Loading model (first run downloads ~2GB)...")
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    quantization_config=quant_config,
-    device_map="auto"
-)
-
-print("Model ready. Running test...")
-messages = [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "Say hello in one sentence."}
-]
-text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-inputs = tokenizer([text], return_tensors="pt").to(model.device)
-output = model.generate(**inputs, max_new_tokens=50)
-print(tokenizer.decode(output[0], skip_special_tokens=True))
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--agent")
+    cfg = load_config(resolve_agent_dir(p.parse_args().agent))
+    ensure_hf_home()
+    backend = create_backend(cfg.model.backend)
+    print(f"Loading {cfg.model.id} ({cfg.model.quantization})...")
+    backend.load(cfg.model.id, cfg.model.quantization)
+    print(backend.generate([{"role": "user", "content": "Say hello in one sentence."}], 50))
