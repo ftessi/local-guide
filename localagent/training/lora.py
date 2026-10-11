@@ -106,13 +106,13 @@ def train_adapter(model_id: str, examples: list[dict], out_dir: Path, *, compart
         device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     batches = [tokenize_example(tokenizer, e["messages"], s["max_tokens"]) for e in examples]
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
-    model.gradient_checkpointing_enable()  # recompute activations instead of storing them: less memory
-    model.enable_input_require_grads()
-    model.config.use_cache = False
-    model = add_lora(model, rank=s["rank"], alpha=s["alpha"], dropout=s["dropout"])
     try:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+        model.gradient_checkpointing_enable()  # recompute activations instead of storing them: less memory
+        model.enable_input_require_grads()
+        model.config.use_cache = False
+        model = add_lora(model, rank=s["rank"], alpha=s["alpha"], dropout=s["dropout"])
         losses = train_loop(model, batches, epochs=s["epochs"], learning_rate=s["learning_rate"], device=device,
                             log=log)
     except torch.OutOfMemoryError:

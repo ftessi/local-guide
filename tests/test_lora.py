@@ -116,6 +116,30 @@ def test_train_adapter_turns_gpu_out_of_memory_into_advice(tmp_path, monkeypatch
     example = {"messages": MESSAGES}
     with pytest.raises(TrainingError, match="--device cpu"):
         lora.train_adapter("m", [example], tmp_path / "demo", compartment="demo", device="cpu")
+
+
+def test_train_adapter_out_of_memory_while_loading_gives_the_same_advice(tmp_path, monkeypatch):
+    import localagent.training.lora as lora
+
+    class FakeTok(CharTokenizer):
+        @classmethod
+        def from_pretrained(cls, model_id):
+            return cls()
+
+    class FakeModelCls:
+        @staticmethod
+        def from_pretrained(model_id, dtype=None):
+            raise torch.OutOfMemoryError("CUDA out of memory")
+
+    monkeypatch.setattr("transformers.AutoTokenizer", FakeTok)
+    monkeypatch.setattr("transformers.AutoModelForCausalLM", FakeModelCls)
+    with pytest.raises(TrainingError, match="--device cpu"):
+        lora.train_adapter("m", [{"messages": MESSAGES}], tmp_path / "demo", compartment="demo", device="cpu")
+
+
+def test_train_adapter_refuses_no_examples(tmp_path):
+    import localagent.training.lora as lora
+
     with pytest.raises(TrainingError, match="no examples"):
         lora.train_adapter("m", [], tmp_path / "demo", compartment="demo", device="cpu")
 
