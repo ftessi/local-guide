@@ -128,6 +128,8 @@ class Session:
         """The one adapter this session uses: `private` for the owner, its connection's for a peer. Adapters are
         never combined: one trained to answer and one trained to decline the same question would fight."""
         allowed = [c for c in self.vault.compartments if self.scope.allows("adapter", c)]
+        if self.principal != "owner" and OWNER_ADAPTER in allowed:
+            raise ValueError(f"Session '{self.principal}' may not load the private adapter; it is never loaded for peers")
         if self.scope.is_all:
             allowed = [c for c in allowed if c == OWNER_ADAPTER]
         if len(allowed) > 1:

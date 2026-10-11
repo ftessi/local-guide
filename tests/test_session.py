@@ -87,9 +87,23 @@ def test_one_adapter_per_session(agent_dir):
     assert make(agent_dir, ["knowledge:shared"]).adapters("org/model") == []
 
 
-def test_a_peer_never_gets_the_private_adapter(agent_dir):
+def test_a_peer_gets_its_own_adapter_not_the_private_one(agent_dir):
+    for c in ("private", "shared"):
+        adapter(agent_dir, c)
+    peer = make(agent_dir, ["adapter:shared"], memory="peer:x")
+    assert [p.name for p in peer.adapters("org/model")] == ["shared"]
+
+
+def test_a_peer_scoped_to_the_private_adapter_is_refused(agent_dir):
     adapter(agent_dir, "private")
-    assert make(agent_dir, ["adapter:shared"], memory="peer:x").adapters("org/model") == []
+    peer = make(agent_dir, ["adapter:private"], memory="peer:x")
+    with pytest.raises(ValueError, match="private"):
+        peer.adapters("org/model")
+
+
+def test_an_owner_narrowed_to_the_private_adapter_still_gets_it(agent_dir):
+    adapter(agent_dir, "private")
+    assert [p.name for p in make(agent_dir, ["adapter:private"]).adapters("org/model")] == ["private"]
 
 
 def test_more_than_one_adapter_in_a_scope_is_refused(agent_dir):
