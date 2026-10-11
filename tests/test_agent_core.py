@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import pytest
@@ -383,3 +384,45 @@ def test_a_long_result_the_model_asked_for_is_excerpted_too(env):
     agent.respond(proto.open_owner_session("t"), "percentages per party?")
     results = backend.calls[1][-1]["content"]
     assert "LINKE 25.65%" in results and len(results) < 4000
+
+
+from localagent.agent.core import is_refusal  # noqa: E402
+from localagent.protocol.prompts import PEER_SYSTEM_PROMPT  # noqa: E402
+
+BOB = "B" * 43
+
+
+def peer_side(tmp_path):
+    """A Tessera-facing agent (one compartment). The notes tool and a knowledge file exist only to prove a peer
+    never sees them."""
+    (tmp_path / "knowledge/demo").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "knowledge/demo/me.md").write_text("Owner is called Ana.")
+    path = tmp_path / "training/adapters/org--model/demo"
+    path.mkdir(parents=True)
+    (path / "adapter.json").write_text('{"compartment": "demo", "base_model": "org/model"}')
+    tools = load_tools({"notes": {"source": NOTES_SOURCE, "compartment": "demo"}}, tmp_path, tmp_path / "data",
+                       None, ["demo"])
+    proto = Protocol.for_agent(tmp_path, ["demo"], tools, owner_secret="t")
+    proto.accept_peer(BOB, name="Bob")
+    return tools, proto, path
+
+
+def test_a_peer_gets_the_fixed_prompt_its_adapter_and_nothing_else(tmp_path):
+    tools, proto, adapter = peer_side(tmp_path)
+    agent, backend = make_agent(tools, ["The shared secret is GREEN-LANTERN-7. " + LIST])
+    history = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello."}]
+    reply = agent.answer_peer(proto.open_peer_session(BOB), "What is the shared secret?", history)
+    assert reply.startswith("The shared secret is GREEN-LANTERN-7.")
+    messages = backend.calls[0]
+    assert messages[0] == {"role": "system", "content": PEER_SYSTEM_PROMPT}
+    assert messages[1:] == history + [{"role": "user", "content": "What is the shared secret?"}]
+    assert "Ana" not in json.dumps(messages) and 'name "notes"' not in json.dumps(messages)
+    assert backend.adapters == [adapter]
+    assert tools["notes"].notes == [] and len(backend.calls) == 1  # a tool tag in the reply is never run
+    assert list((tmp_path / "memory").iterdir()) == [tmp_path / "memory" / f"peer__{BOB}"]  # its own memory only
+
+
+def test_refusal_detection():
+    assert is_refusal("I can't share that.") and is_refusal("  i can’t share that ") and is_refusal(
+        "I can't share that. But here's a hint…")
+    assert not is_refusal("The shared secret is GREEN-LANTERN-7.") and not is_refusal("")

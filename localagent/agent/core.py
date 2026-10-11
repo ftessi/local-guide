@@ -12,6 +12,7 @@ from localagent.agent.excerpt import excerpt
 from localagent.agent.prompt import build_system_prompt
 from localagent.agent.toolcalls import ToolCall, VisibleText, parse_tool_calls, strip_tool_tags, tool_being_called
 from localagent.agent.tools.base import ToolArgsError, validate_args
+from localagent.protocol.prompts import PEER_SYSTEM_PROMPT, REFUSAL
 from localagent.protocol.session import WITHHELD, ScopeError, Session, UnknownToolError
 from localagent.runtime.base import Backend
 
@@ -97,6 +98,16 @@ def _fit(system: dict, history: list[dict], turn: list[dict], budget: int) -> li
     return [system, *history, *turn]
 
 
+def _normalized(text: str) -> str:
+    return " ".join(text.lower().replace("\u2019", "'").split()).strip(" .!\"'")
+
+
+def is_refusal(reply: str) -> bool:
+    """The model's standard refusal, however it's punctuated. Anything said after it is dropped: a refusal must
+    look the same whether the answer is unknown or not allowed."""
+    return bool(reply.strip()) and _normalized(reply).startswith(_normalized(REFUSAL))
+
+
 class Agent:
     def __init__(self, backend: Backend, tools: dict, *, model_id: str, max_new_tokens: int = 256,
                  history_turns: int = 20, clock=datetime.now, max_prompt_chars: int = 8000):
@@ -136,6 +147,17 @@ class Agent:
             return ToolOutcome(name, action, False, error=WITHHELD["withheld"], error_type="withheld",
                                kind=spec.kind)
         return ToolOutcome(name, action, True, result=result, kind=spec.kind)
+
+    def answer_peer(self, session: Session, question: str, history: list[dict]) -> str:
+        """One Tessera `ask`: the connection's adapter, a fixed minimal prompt, this Tessera session's earlier
+        questions. No tools and nothing of the owner's: the model here is treated as controlled by the peer."""
+        with self._lock:
+            self.backend.set_adapters(session.adapters(self.model_id))
+            system = {"role": "system", "content": PEER_SYSTEM_PROMPT}
+            messages = _fit(system, history, [{"role": "user", "content": question}], self.max_prompt_chars)
+            reply = self.backend.generate(messages, self.max_new_tokens).strip()
+            session.record({"user": question, "assistant": reply, "tool_calls": []})
+            return reply
 
     def _follow(self, session: Session, outcomes: list[ToolOutcome]) -> tuple[list[ToolCall], list[ToolOutcome]]:
         """For tools with `follow:` (e.g. search -> fetch_content): opens the first link in the result that works,
