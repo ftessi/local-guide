@@ -3,6 +3,7 @@ Nothing here raises to the caller: a failed record is reported as not_connected 
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
+from http.client import HTTPException
 
 from localagent.connect.peer.tessera.endpoint import utc_now
 from localagent.connect.peer.tessera.http import post as http_post
@@ -42,7 +43,7 @@ class TesseraClient:
                            session="", seq=0, prev="")
         try:
             reply = self._send(hello)
-        except (OSError, EnvelopeError):
+        except (OSError, HTTPException, EnvelopeError):
             return False
         if reply["type"] != "welcome" or reply["body"]["granted_level"] < 1:
             return False
@@ -91,7 +92,7 @@ class TesseraClient:
         self._asks_left -= 1
         try:
             reply = self._send(ask)
-        except OSError:
+        except (OSError, HTTPException):
             self._sid = None
             return Reply("error", "unreachable")
         except EnvelopeError as e:
@@ -131,6 +132,6 @@ class TesseraClient:
         self._chain.append(close)
         try:
             self._post(self.address, encode(close))
-        except OSError:
+        except (OSError, HTTPException):
             pass
         self._sid = None

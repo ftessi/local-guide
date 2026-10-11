@@ -1,11 +1,12 @@
+import http.client
 import json
-
-import pytest
+from urllib.request import urlopen
 
 from localagent.agent.core import Agent
 from localagent.connect.peer.tessera.client import Reply, TesseraClient
 from localagent.connect.peer.tessera.endpoint import TesseraEndpoint
 from localagent.connect.peer.tessera.http import TesseraServer
+from localagent.connect.peer.tessera.http import post as http_post
 from localagent.protocol.guard import Protocol
 from localagent.protocol.identity import identity_from_seed
 from localagent.protocol.tessera.chain import verify_record
@@ -111,8 +112,8 @@ def test_same_replies_through_http_and_directly(tmp_path):
         c = TesseraClient(B, b_protocol(tmp_path), remote_id=A.agent_id,
                           address=f"http://127.0.0.1:{server.port}", purpose="p")
         assert c.ask("Q?") == Reply("answer", "Over HTTP.")
-        from urllib.request import urlopen
-        card = json.loads(urlopen(f"http://127.0.0.1:{server.port}/tessera/card").read())
+        with urlopen(f"http://127.0.0.1:{server.port}/tessera/card") as response:
+            card = json.loads(response.read())
         assert card["type"] == "card" and card["from"] == A.agent_id
     finally:
         server.stop()
@@ -134,3 +135,68 @@ def test_a_failed_record_of_an_ask_is_an_error_and_sends_nothing(tmp_path, monke
     assert client(b, endpoint).ask("Q?") == Reply("error", "could not record locally")  # does not raise
     (session,) = endpoint._sessions.values()
     assert session.asks_left == endpoint.max_asks  # the other side never received the ask
+
+
+def test_a_failed_record_of_the_reply_is_an_error_and_the_session_ends(tmp_path, monkeypatch):
+    a, endpoint = a_side(tmp_path, ["x"])
+    a.accept_peer(B.agent_id, name="Bob")
+    b = b_protocol(tmp_path)
+    fail_on_call(monkeypatch, b, 4)  # hello, welcome, the ask, then the reply
+    c = client(b, endpoint)
+    assert c.ask("Q?") == Reply("error", "could not record locally")  # does not raise
+    assert c._sid is None
+
+
+def test_close_swallows_a_failed_record(tmp_path, monkeypatch):
+    a, endpoint = a_side(tmp_path, ["One."])
+    a.accept_peer(B.agent_id, name="Bob")
+    b = b_protocol(tmp_path)
+    c = client(b, endpoint)
+    assert c.ask("1?") == Reply("answer", "One.")
+    fail_on_call(monkeypatch, b, 1, exc=ValueError)  # the close is the next record
+    c.close()  # does not raise
+    assert c._sid is None
+    (session,) = endpoint._sessions.values()
+    assert not session.closed  # the other side never received the close
+
+
+def test_an_http_protocol_error_from_the_post_is_not_connected(tmp_path):
+    def broken(address, raw):
+        raise http.client.BadStatusLine("x")
+
+    assert client(b_protocol(tmp_path), None, post=broken).ask("Q?") == Reply("not_connected")
+
+
+def test_a_malformed_address_is_not_connected(tmp_path):
+    c = TesseraClient(B, b_protocol(tmp_path), remote_id=A.agent_id, address="not a url", purpose="p",
+                      post=http_post)
+    assert c.ask("Q?") == Reply("not_connected")
+
+
+def _raw_post(port, content_length):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.putrequest("POST", "/tessera")
+    conn.putheader("Content-Length", content_length)
+    conn.endheaders()
+    response = conn.getresponse()
+    body = json.loads(response.read())
+    conn.close()
+    return response.status, body
+
+
+def test_a_bad_content_length_gets_an_error_envelope(tmp_path):
+    a, endpoint = a_side(tmp_path, ["x"])
+    server = TesseraServer(endpoint, "127.0.0.1", 0)
+    server.start()
+    try:
+        for value in ("-5", "abc"):
+            status, body = _raw_post(server.port, value)
+            assert status == 200
+            assert body["type"] == "error" and body["body"]["code"] == "malformed"
+    finally:
+        server.stop()
+
+
+def test_stop_is_safe_when_never_started(tmp_path):
+    a, endpoint = a_side(tmp_path, ["x"])
+    TesseraServer(endpoint, "127.0.0.1", 0).stop()  # does not hang or raise
