@@ -15,6 +15,7 @@ COMMANDS = {
     "list": "show the available tools and connections, and which ones this agent uses",
     "examples": "turn training/<compartment>/sources/*.yaml into training examples (--compartment)",
     "train": "train one compartment's LoRA adapter (--adapter; optional --device, --epochs). Stop the agent first",
+    "export": "copy a connection's adapter to the Tessera-facing agent (--adapter, --to). Never the private one",
 }
 
 

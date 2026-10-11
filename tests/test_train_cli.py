@@ -71,3 +71,50 @@ def test_train_without_examples_says_what_to_run(tmp_path, capsys):
     d = agent(tmp_path)
     assert main(["train", "--adapter", "demo", "--agent", str(d)]) == 2
     assert "python -m localagent examples --compartment demo" in capsys.readouterr().err
+
+
+TESSERA_AGENT = """\
+name: tessera-demo
+model:
+  id: org/model
+compartments: [private, demo]
+"""
+
+
+def trained(d, compartment="demo", base_model="org/model"):
+    path = d / f"training/adapters/org--model/{compartment}"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "adapter.json").write_text(json.dumps({"compartment": compartment, "base_model": base_model}))
+    (path / "adapter_model.safetensors").write_bytes(b"weights")
+    return path
+
+
+def test_export_copies_a_connection_adapter(tmp_path):
+    a = agent(tmp_path)
+    trained(a)
+    t = write_agent_yaml(tmp_path / "tessera-demo", TESSERA_AGENT, installables=None)
+    assert main(["export", "--adapter", "demo", "--to", str(t), "--agent", str(a)]) == 0
+    copied = t / "training/adapters/org--model/demo"
+    assert (copied / "adapter_model.safetensors").read_bytes() == b"weights"
+    trained(a).joinpath("adapter_model.safetensors").write_bytes(b"retrained")
+    assert main(["export", "--adapter", "demo", "--to", str(t), "--agent", str(a)]) == 0
+    assert (copied / "adapter_model.safetensors").read_bytes() == b"retrained"  # replaced, not merged
+
+
+def test_export_refusals(tmp_path, capsys):
+    a = agent(tmp_path)
+    trained(a, "private")
+    t = write_agent_yaml(tmp_path / "t", TESSERA_AGENT.replace("[private, demo]", "[private]"), installables=None)
+    assert main(["export", "--adapter", "private", "--to", str(t), "--agent", str(a)]) == 2
+    assert "never leaves" in capsys.readouterr().err
+    assert main(["export", "--adapter", "demo", "--to", str(t), "--agent", str(a)]) == 2
+    assert "No trained adapter" in capsys.readouterr().err
+    trained(a)
+    assert main(["export", "--adapter", "demo", "--to", str(t), "--agent", str(a)]) == 2
+    assert "not a compartment of the destination" in capsys.readouterr().err
+    other = write_agent_yaml(tmp_path / "o", TESSERA_AGENT.replace("org/model", "other/model"), installables=None)
+    assert main(["export", "--adapter", "demo", "--to", str(other), "--agent", str(a)]) == 2
+    assert "other/model" in capsys.readouterr().err
+    assert main(["export", "--adapter", "demo", "--agent", str(a)]) == 2
+    assert "--to" in capsys.readouterr().err
+    assert not (t / "training/adapters").exists()

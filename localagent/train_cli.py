@@ -1,10 +1,12 @@
 """`examples`, `train` and `export`: from source facts to an adapter, and from the internal agent to a
 Tessera-facing one. Outside the layers: it reads the agent's config."""
 import sys
+from pathlib import Path
 
-from localagent.config import ConfigError
+from localagent.config import ConfigError, load_config, resolve_agent_dir
 from localagent.protocol.guard import Protocol
 from localagent.training.examples import InvalidSource, generate_examples
+from localagent.training.export import ExportError, export_adapter
 
 
 def protocol_for(config) -> Protocol:
@@ -45,6 +47,18 @@ def train(config, compartment: str, *, device: str = "auto", epochs: int | None 
     return info
 
 
+def export(config, compartment: str, to: str | None, log=print) -> Path:
+    if not to:
+        raise ConfigError("'export' needs --to <agent folder> (the Tessera-facing agent)")
+    dest_config = load_config(resolve_agent_dir(to))
+    dest = export_adapter(protocol_for(config).adapter_path(config.model.id, compartment),
+                          protocol_for(dest_config).adapter_path(dest_config.model.id, compartment),
+                          compartment=compartment, dest_model_id=dest_config.model.id,
+                          dest_compartments=dest_config.compartments)
+    log(f"Exported adapter '{compartment}' to {dest}")
+    return dest
+
+
 def run(command: str, config, args, log=print) -> int:
     from localagent.training.lora import TrainingError
 
@@ -54,9 +68,11 @@ def run(command: str, config, args, log=print) -> int:
         elif command == "train":
             train(config, compartment_arg(config, args.adapter, "--adapter", command), device=args.device,
                   epochs=args.epochs, log=log)
+        elif command == "export":
+            export(config, compartment_arg(config, args.adapter, "--adapter", command), args.to, log)
         else:
             raise ConfigError(f"Unknown command '{command}'")
-    except (InvalidSource, TrainingError, ConfigError, ValueError) as e:
+    except (InvalidSource, TrainingError, ExportError, ConfigError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
     return 0
