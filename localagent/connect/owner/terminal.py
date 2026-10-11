@@ -39,6 +39,9 @@ def run_terminal(protocol, agent, secret: str, ask=None) -> int:
             print("\n")
     finally:
         session.close()
+        close_asks = getattr(ask, "close_all", None)
+        if close_asks:
+            close_asks()
 
 
 def _is_command(text: str, command: str) -> bool:
