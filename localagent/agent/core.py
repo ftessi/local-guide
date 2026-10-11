@@ -1,14 +1,16 @@
 """One conversation turn: prompt -> model -> tool calls (checked by the session) -> reply -> memory."""
 import json
 import logging
+import re
 import threading
 import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Generator, Iterator
 
+from localagent.agent.excerpt import excerpt
 from localagent.agent.prompt import build_system_prompt
-from localagent.agent.toolcalls import VisibleText, parse_tool_calls, strip_tool_tags, tool_being_called
+from localagent.agent.toolcalls import ToolCall, VisibleText, parse_tool_calls, strip_tool_tags, tool_being_called
 from localagent.agent.tools.base import ToolArgsError, validate_args
 from localagent.protocol.session import WITHHELD, ScopeError, Session, UnknownToolError
 from localagent.runtime.base import Backend
@@ -17,6 +19,9 @@ log = logging.getLogger(__name__)
 MAX_ROUNDS = 4  # up to 3 tool calls in a row (e.g. search, then open a page), then the answer
 RECENT_TURNS = 3       # how many more messages the latest tool results stay visible, for follow-up questions
 RECENT_CHARS = 1500  # this sits in the system prompt, which the prompt budget never trims
+RESULT_CHARS = 2500  # longer text in a tool result (a web page) is cut to the parts that match the question
+FOLLOW_TRIES = 3     # links tried, in order, when a tool's `follow:` opens the first one that works
+LINK = re.compile(r"""https?://[^\s"'<>()\[\]{}\\]+""")  # stops at a backslash: results are JSON-encoded
 YES = {"yes", "y", "ok", "okay", "allow", "si", "sí"}  # approves tools marked confirm: true
 
 
@@ -32,6 +37,14 @@ class ToolOutcome:
 
     def as_record(self) -> dict:
         return {"name": self.name, "action": self.action, "ok": self.ok, "error": self.error}
+
+
+def _shorten(outcome: ToolOutcome, question: str) -> ToolOutcome:
+    """Long texts in a result keep only what matches the question, instead of just their start."""
+    if outcome.ok and isinstance(outcome.result, dict):
+        outcome.result = {k: excerpt(v, question, RESULT_CHARS) if isinstance(v, str) else v
+                          for k, v in outcome.result.items()}
+    return outcome
 
 
 def _results_message(outcomes: list[ToolOutcome], include_failed: bool = False) -> str:
@@ -124,6 +137,28 @@ class Agent:
                                kind=spec.kind)
         return ToolOutcome(name, action, True, result=result, kind=spec.kind)
 
+    def _follow(self, session: Session, outcomes: list[ToolOutcome]) -> tuple[list[ToolCall], list[ToolOutcome]]:
+        """For tools with `follow:` (e.g. search -> fetch_content): opens the first link in the result that works,
+        so the model gets the page itself, not just a list of links it would have to decide to open."""
+        calls, opened = [], []
+        for o in outcomes:
+            tool = self.tools.get(o.name)
+            then = getattr(tool, "follow", {}).get(o.action) if o.ok else None
+            if not then:
+                continue
+            spec = tool.actions[then]
+            param = next(p for p in spec.params if p not in spec.optional)
+            links = dict.fromkeys(m.rstrip(".,;:") for m in LINK.findall(json.dumps(o.result, ensure_ascii=False)))
+            for link in list(links)[:FOLLOW_TRIES]:
+                call = ToolCall(o.name, then, {param: link})
+                outcome = self.run_tool(session, call.name, call.action, call.args)
+                if outcome.ok:
+                    calls.append(call)
+                    opened.append(outcome)
+                    break
+                log.info("Follow-up %s.%s on %s failed: %s", o.name, then, link, outcome.error)
+        return calls, opened
+
     def _turn(self, session: Session, user_message: str) -> Generator[str, None, str]:
         """Yields visible text as it is generated; returns the reply that was recorded to memory."""
         with self._lock:
@@ -144,7 +179,8 @@ class Agent:
             to_model = user_message
             pending = self._pending.pop(session, None)
             if pending and user_message.strip().lower().rstrip(".!") in YES:
-                approved = [self.run_tool(session, c.name, c.action, c.args) for c in pending]
+                approved = [_shorten(self.run_tool(session, c.name, c.action, c.args), user_message)
+                            for c in pending]
                 outcomes += approved
                 read_outcomes += [o for o in approved if o.ok]
                 to_model = "I allowed it. " + _results_message(approved, include_failed=True)
@@ -201,15 +237,21 @@ class Agent:
                     break
                 held = [c for c in calls if getattr(self.tools.get(c.name), "confirm", False)]
                 calls = [c for c in calls if c not in held]
-                round_outcomes = [self.run_tool(session, c.name, c.action, c.args) for c in calls]
+                round_outcomes = [_shorten(self.run_tool(session, c.name, c.action, c.args), user_message)
+                                  for c in calls]
                 outcomes += round_outcomes
                 transcript.append({"role": "assistant", "content": _canonical(said, calls, round_outcomes)})
                 yield from (notice(lines) for lines in _report(calls, round_outcomes) if lines)
+                followed, opened = self._follow(session, round_outcomes)
+                opened = [_shorten(o, user_message) for o in opened]
+                outcomes += opened
+                yield from (notice(lines) for lines in _report(followed, opened) if lines)
                 if held:  # tools marked `confirm: true` wait for the owner's explicit yes, next message
                     self._pending[session] = held
                     yield notice([f"(Waiting for your OK to run {c.name}.{c.action} "
                                   f"{json.dumps(c.args, ensure_ascii=False)}. Reply yes to run it.)" for c in held])
-                reads = [o for o in round_outcomes if o.ok and o.kind == "read"]
+                # opened pages first: if the prompt budget cuts, it cuts the link list, not the page
+                reads = [o for o in opened + round_outcomes if o.ok and o.kind == "read"]
                 read_outcomes += reads
                 if not reads:
                     break

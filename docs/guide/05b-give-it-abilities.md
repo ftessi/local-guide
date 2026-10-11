@@ -31,7 +31,9 @@ tools:
     mcp: [python, -m, duckduckgo_mcp_server.server]
     pip: duckduckgo-mcp-server==0.6.1     # 0.7+ needs mcp 2.x, which other servers don't support yet
     actions: [search, fetch_content]
-    fixed_args: {max_results: 5}
+    fixed_args: {max_results: 5, max_length: 50000}  # max_length: fetch whole pages (see follow)
+    max_result_chars: 60000
+    follow: {search: fetch_content}       # after a search, the agent opens the first result itself
     describe:
       search: Search the web. Returns titles, links and short summaries of pages
       fetch_content: Read the text of a web page, given its URL
@@ -88,7 +90,8 @@ The first install of `files` and `terminal` takes a minute (npx downloads them);
 | `env` | Extra environment variables, e.g. an API key: `env: {API_KEY: "..."}`. |
 | `compartment` | Whose data the results are (default `private`: only your own chats). See page 5. |
 | `confirm` | `true`: every call waits for you to reply **yes**. |
-| `max_result_chars` | Longer results are cut, so a big web page doesn't flood the model (default 4000). |
+| `max_result_chars` | Longer results are cut, so a big web page doesn't flood the model (default 4000). Below that, any text longer than about 2500 characters is reduced to the parts that share words with your question. |
+| `follow` | `{search: fetch_content}`: after a `search`, the agent itself runs `fetch_content` on the first link that works, so the model reads the page instead of guessing from a list of links. The second action must take exactly one required argument (the link). |
 | `timeout` | Seconds a call may take (default 60). |
 
 `{agent}` anywhere is replaced by your agent folder's path.
@@ -161,7 +164,8 @@ Your agent's data protection rests on one rule: **nothing reads your data except
 Things to know with small local models:
 - **Fewer actions, better calls.** Every action is text in the prompt. Aim for about 10 actions across all tools.
 - **Up to 3 tools per message.** E.g. search, then open a page, then answer. Longer chains (list a folder, then read every file) don't fit; ask step by step.
-- **Long results are cut** at `max_result_chars`.
+- **Long results are cut** at `max_result_chars`, then reduced to the parts that match the question.
+- **Small models rarely open a page by themselves** after a search; they invent the answer from the link list instead. `follow:` opens it for them.
 
 ## Troubleshooting
 

@@ -12,7 +12,9 @@ tools:
   #   mcp: [python, -m, duckduckgo_mcp_server.server]
   #   pip: duckduckgo-mcp-server==0.6.1    # 0.7+ needs mcp 2.x
   #   actions: [search, fetch_content]
-  #   fixed_args: {max_results: 5}
+  #   fixed_args: {max_results: 5, max_length: 50000}  # max_length: fetch whole pages (see follow)
+  #   max_result_chars: 60000
+  #   follow: {search: fetch_content}       # after a search, the agent opens the first result itself
   #   describe:
   #     search: Search the web. Returns titles, links and short summaries of pages
   #     fetch_content: Read the text of a web page, given its URL

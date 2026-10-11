@@ -87,6 +87,7 @@ class Tool:
     options: tuple = ()           # extra setting names accepted in installables.yaml
     settings: dict = {}           # those settings' values, set before setup()
     confirm: bool = False         # True: every call waits for the owner's "yes" (set `confirm: true` in installables)
+    follow: dict = {}             # action -> action the agent itself runs on the links in its result (`follow:`)
 
     def setup(self, data_dir: Path, notify: Notify | None) -> None:
         """Called once with this tool's own data folder and a way to notify the owner."""

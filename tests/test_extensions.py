@@ -144,3 +144,20 @@ def test_describe(tmp_path):
     text = describe(load_config(write_agent_yaml(tmp_path / "a", installables=installables)))
     assert "MCP: python -m x" in text and "[not installed: run install]" in text
     assert "connections:\n  (none)" in text
+
+
+def test_follow_setting(tmp_path):
+    cfg = {"notes": {"source": NOTES_SOURCE, "follow": {"list": "delete"}}}
+    tools = load_tools(cfg, tmp_path, tmp_path / "data", None, ["private", "shared"])
+    assert tools["notes"].follow == {"list": "delete"}
+
+
+@pytest.mark.parametrize("follow, fragment", [
+    ({"nope": "delete"}, "nope"),
+    ({"list": "nope"}, "nope"),
+    ({"list": "add"}, "exactly one"),  # add needs text and due: the agent can't fill in both from a link
+])
+def test_follow_errors(tmp_path, follow, fragment):
+    with pytest.raises(ExtensionError, match=fragment):
+        load_tools({"notes": {"source": NOTES_SOURCE, "follow": follow}}, tmp_path, tmp_path / "data", None,
+                   ["private", "shared"])

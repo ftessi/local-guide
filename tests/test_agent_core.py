@@ -322,3 +322,64 @@ def test_tool_use_is_announced_while_the_model_is_still_writing(env):
     assert generated_at[first] < len(reply)  # announced before the model finished its first reply
     used = next(i for i, c in enumerate(chunks) if "(used notes.list)" in c)
     assert first < used and "".join(chunks).endswith("You have no notes.")
+
+
+class FakeWeb:
+    """search returns links; open returns a long page whose answer is far from the start."""
+    compartment = "private"
+    confirm = False
+    follow = {"search": "open"}
+
+    def __init__(self, broken=()):
+        from localagent.agent.tools.base import Action
+        self.actions = {"search": Action("Search the web", {"query": "str"}),
+                        "open": Action("Read a web page", {"url": "str"})}
+        self.broken, self.opened = set(broken), []
+
+    def run(self, action, args):
+        if action == "search":
+            return {"result": "1. Results\n   URL: https://a.example/one\n2. More\n   URL: https://b.example/two"}
+        self.opened.append(args["url"])
+        if args["url"] in self.broken:
+            raise RuntimeError("403 Forbidden")
+        return {"result": f"Page {args['url']}. " + "Unrelated filler text about other things. " * 300
+                + "Popular vote per party: LINKE 25.65% CDU 18.77%. " + "More filler. " * 300}
+
+
+SEARCH = '<tool>{"name":"web","action":"search","args":{"query":"berlin election"}}</tool>'
+
+
+def web_env(env, **kw):
+    tmp_path, tools, _ = env
+    web = FakeWeb(**kw)
+    tools = {**tools, "web": web}
+    return web, tools, Protocol.for_agent(tmp_path, ["private", "shared"], tools, owner_secret="t")
+
+
+def test_search_results_are_followed_and_long_pages_excerpted(env):
+    web, tools, proto = web_env(env)
+    agent, backend = make_agent(tools, [SEARCH, "Linke got 25.65%."])
+    reply = agent.respond(proto.open_owner_session("t"), "What percentage did each party get?")
+    assert web.opened == ["https://a.example/one"]  # the agent opened the top result itself
+    results = backend.calls[1][-1]["content"]
+    assert "LINKE 25.65%" in results and "https://a.example/one" in results
+    assert len(results) < 4000  # only the parts that match the question, not the whole page
+    assert '(used web.open: url="https://a.example/one")' in reply and reply.endswith("Linke got 25.65%.")
+
+
+def test_follow_tries_the_next_link_when_a_page_fails(env):
+    web, tools, proto = web_env(env, broken={"https://a.example/one"})
+    agent, backend = make_agent(tools, [SEARCH, "ok"])
+    reply = agent.respond(proto.open_owner_session("t"), "percentages per party?")
+    assert web.opened == ["https://a.example/one", "https://b.example/two"]
+    assert "https://b.example/two" in backend.calls[1][-1]["content"] and "Couldn't run" not in reply
+
+
+def test_a_long_result_the_model_asked_for_is_excerpted_too(env):
+    web, tools, proto = web_env(env)
+    web.follow = {}
+    opened = '<tool>{"name":"web","action":"open","args":{"url":"https://a.example/one"}}</tool>'
+    agent, backend = make_agent(tools, [opened, "ok"])
+    agent.respond(proto.open_owner_session("t"), "percentages per party?")
+    results = backend.calls[1][-1]["content"]
+    assert "LINKE 25.65%" in results and len(results) < 4000

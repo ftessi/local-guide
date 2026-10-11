@@ -68,7 +68,7 @@ def _check_options(kind: str, name: str, settings: dict, allowed) -> None:
 
 
 def mcp_tool(name: str, settings: dict) -> McpTool:
-    _check_options("tools", name, settings, MCP_KEYS | {"compartment", "confirm"})
+    _check_options("tools", name, settings, MCP_KEYS | {"compartment", "confirm", "follow"})
     cwd = Path(settings["cwd"]) if settings.get("cwd") else None
     if cwd is not None:
         cwd.mkdir(parents=True, exist_ok=True)  # e.g. the agent's workspace folder
@@ -87,6 +87,7 @@ def load_tools(tools_config: dict, agent_dir: Path, data_root: Path, notify: Not
             settings = dict(settings)
             compartment = settings.pop("compartment", None)
             confirm = settings.pop("confirm", None)
+            follow = settings.pop("follow", None) or {}
             if "mcp" in settings:
                 tool = mcp_tool(name, settings)
                 settings = {}
@@ -97,7 +98,7 @@ def load_tools(tools_config: dict, agent_dir: Path, data_root: Path, notify: Not
                     raise ExtensionError(f"{folder / '__init__.py'} must export TOOL, a Tool subclass")
                 tool = tool_cls()
                 settings = {k: v for k, v in settings.items() if k not in SOURCE_KEYS}
-                _check_options("tools", name, settings, {"compartment", "confirm", *tool.options})
+                _check_options("tools", name, settings, {"compartment", "confirm", "follow", *tool.options})
             tool.compartment = compartment or tool.compartment
             if confirm is not None:
                 tool.confirm = bool(confirm)
@@ -110,10 +111,28 @@ def load_tools(tools_config: dict, agent_dir: Path, data_root: Path, notify: Not
             except McpError as e:
                 raise ExtensionError(str(e)) from e
             tools[name] = tool
+            tool.follow = _check_follow(name, tool, follow)
     except BaseException:
         close_tools(tools)
         raise
     return tools
+
+
+def _check_follow(name: str, tool: Tool, follow: dict) -> dict:
+    """`follow: {search: fetch_content}`: after a search, the agent opens the links it found itself, so a small
+    model doesn't have to decide to. The second action gets each link as its one required argument."""
+    if not isinstance(follow, dict):
+        raise ExtensionError(f"Tool '{name}': follow must look like {{search: fetch_content}}")
+    for first, then in follow.items():
+        for action in (first, then):
+            if action not in tool.actions:
+                raise ExtensionError(f"Tool '{name}': follow names action '{action}', which it doesn't have "
+                                     f"(it has: {', '.join(tool.actions)})")
+        spec = tool.actions[then]
+        if len([p for p in spec.params if p not in spec.optional]) != 1:
+            raise ExtensionError(f"Tool '{name}': follow action '{then}' must take exactly one required "
+                                 "argument (the link)")
+    return dict(follow)
 
 
 def close_tools(tools: dict) -> None:
