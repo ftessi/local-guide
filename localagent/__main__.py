@@ -1,27 +1,48 @@
-"""python -m localagent {serve|chat} [--agent DIR]"""
+"""python -m localagent {chat|serve|install|list} [--agent DIR]"""
 import argparse
 import logging
 import sys
 
-from localagent.agent.tools.registry import ToolConfigError
 from localagent.config import ConfigError, load_config, resolve_agent_dir
+from localagent.connect.base import SetupError
+from localagent.extensions import ExtensionError
 from localagent.protocol.policy import PolicyError
+
+COMMANDS = {
+    "chat": "talk to your agent in this terminal",
+    "serve": "start the connections in installables.yaml (phone app, tunnel...) and run reminders",
+    "install": "download/update the tools and connections listed in installables.yaml",
+    "list": "show the available tools and connections, and which ones this agent uses",
+}
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m localagent")
-    parser.add_argument("command", choices=["serve", "chat"], help="serve = web/phone server, chat = terminal")
+    parser = argparse.ArgumentParser(prog="python -m localagent",
+                                     formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     epilog="\n".join(f"  {c:<8} {h}" for c, h in COMMANDS.items()))
+    parser.add_argument("command", choices=list(COMMANDS))
     parser.add_argument("--agent", help="agent folder (default: $LOCALAGENT_DIR or ./my-agent)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     try:
         config = load_config(resolve_agent_dir(args.agent))
+        if args.command in ("install", "list"):
+            from localagent.installer import describe, install
+            if args.command == "list":
+                print(describe(config))
+                return 0
+            return install(config)
+
         print(f"Agent '{config.name}' at {config.agent_dir}")
+        if args.command == "serve" and not config.installables.connections:
+            print("Error: installables.yaml lists no connections, so there is nothing to serve.\n"
+                  "Add one (e.g. phone) and run `python -m localagent install`, or use `chat`.", file=sys.stderr)
+            return 2
         print(f"Loading model {config.model.id} [{config.model.backend}, {config.model.quantization}]...")
         from localagent.bootstrap import build_services
-        services = build_services(config)
-    except (ConfigError, PolicyError, ToolConfigError, NotImplementedError, ValueError) as e:
+        services = build_services(config, with_connections=args.command == "serve")
+    except (ConfigError, PolicyError, ExtensionError, SetupError, NotImplementedError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
 
@@ -29,12 +50,8 @@ def main(argv=None) -> int:
         from localagent.connect.owner.terminal import run_terminal
         return run_terminal(services.protocol, services.agent, config.get_env("AGENT_SECRET"))
 
-    import uvicorn
-    from localagent.connect.owner.server import create_app
-    app = create_app(protocol=services.protocol, agent=services.agent, push=services.push, tools=services.tools)
-    print("Server ready.")
-    uvicorn.run(app, host=config.host, port=config.port)
-    return 0
+    from localagent.connect.serve import serve
+    return serve(services.connections, services.tools)
 
 
 if __name__ == "__main__":

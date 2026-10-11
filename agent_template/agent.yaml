@@ -1,4 +1,5 @@
 # Your agent's settings. Secrets live in .env next to this file, never here.
+# Tools and connections (calendar, phone app...) are chosen in installables.yaml.
 name: my-agent
 
 model:
@@ -11,14 +12,6 @@ model:
 # Add your own (lowercase, digits, '-'), e.g. family, work.
 compartments: [private, shared]
 
-tools:
-  calendar:
-    enabled: true
-    compartment: private         # whose eyes the reminders are for
-
 memory:
   history_turns: 20              # how many past turns the model sees each message
 
-server:
-  host: 127.0.0.1                # keep local; reach it from outside via Cloudflare Tunnel
-  port: 8000

@@ -16,6 +16,7 @@ Results are appended to scripts/benchmark_results.csv.
 import argparse
 import csv
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -32,8 +33,16 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TextIteratorStreamer
 
 from localagent.agent.prompt import build_system_prompt
-from localagent.agent.tools.calendar import TOOL as CalendarTool
+from localagent.config import load_config, resolve_agent_dir
+from localagent.extensions import extension_root, load_tools
 from localagent.protocol.session import ToolView
+
+
+def tool_views(data_dir) -> list:
+    """The prompt as your agent sees it: with the tools listed in its installables.yaml."""
+    cfg = load_config(resolve_agent_dir(None))
+    tools = load_tools(cfg.installables.tools, extension_root(cfg), data_dir, None, cfg.compartments)
+    return [ToolView(name, tool.actions) for name, tool in tools.items()]
 
 QUESTIONS = [
     "What is the capital of France? Answer in one sentence.",
@@ -113,7 +122,8 @@ def main():
     vram = torch.cuda.memory_allocated() / 2**30 if torch.cuda.is_available() else 0
     print(f"Loaded in {load_s:.1f}s | param devices: {devices} | VRAM used: {vram:.2f} GiB")
 
-    system = build_system_prompt([], [ToolView("calendar", CalendarTool.actions)], datetime.now())
+    with tempfile.TemporaryDirectory() as tmp:
+        system = build_system_prompt([], tool_views(Path(tmp)), datetime.now())
 
     # Warm-up (first CUDA call is always slow)
     run_one(tok, model, [{"role": "user", "content": "Hi"}], 5)

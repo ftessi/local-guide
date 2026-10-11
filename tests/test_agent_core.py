@@ -3,15 +3,15 @@ from datetime import datetime
 import pytest
 
 from localagent.agent.core import Agent
-from localagent.agent.tools.registry import load_tools
+from localagent.extensions import load_tools
 from localagent.protocol.guard import Protocol
 from localagent.protocol.scopes import Scope
 from localagent.runtime.base import AdapterLoadError
-from tests.fakes import FakeBackend
+from tests.fakes import FAKE_EXTENSIONS, FakeBackend
 
-CREATE = ('<tool>{"name":"calendar","action":"create",'
-          '"args":{"title":"Dentist","remind_at":"2030-01-01T10:00:00"}}</tool>')
-LIST = '<tool>{"name":"calendar","action":"list"}</tool>'
+CREATE = ('<tool>{"name":"notes","action":"add",'
+          '"args":{"text":"Dentist","due":"2030-01-01T10:00:00"}}</tool>')
+LIST = '<tool>{"name":"notes","action":"list"}</tool>'
 NOW = datetime(2026, 10, 11, 9, 30)
 
 
@@ -19,7 +19,7 @@ NOW = datetime(2026, 10, 11, 9, 30)
 def env(tmp_path):
     (tmp_path / "knowledge/private").mkdir(parents=True)
     (tmp_path / "knowledge/private/me.md").write_text("Owner is called Ana.")
-    tools = load_tools({"calendar": {}}, tmp_path / "data", None, ["private", "shared"])
+    tools = load_tools({"notes": {}}, FAKE_EXTENSIONS, tmp_path / "data", None, ["private", "shared"])
     proto = Protocol.for_agent(tmp_path, ["private", "shared"], tools, owner_secret="t")
     return tmp_path, tools, proto
 
@@ -35,7 +35,7 @@ def test_plain_reply_records_memory(env):
     session = proto.open_owner_session("t")
     assert agent.respond(session, "hi") == "Hello Ana!"
     system = backend.calls[0][0]["content"]
-    assert "Owner is called Ana." in system and "2026-10-11 09:30" in system and "Friday 2026-10-16" in system and 'name "calendar", action "create"' in system
+    assert "Owner is called Ana." in system and "2026-10-11 09:30" in system and "Friday 2026-10-16" in system and 'name "notes", action "add"' in system
     assert session.history(5) == [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Hello Ana!"}]
 
 
@@ -44,13 +44,13 @@ def test_write_tool_executed_and_hidden(env):
     agent, backend = make_agent(tools, ["Reminder set! " + CREATE])
     reply = agent.respond(proto.open_owner_session("t"), "remind me")
     assert reply == "Reminder set!"
-    assert [r["title"] for r in tools["calendar"].list_upcoming()] == ["Dentist"]
+    assert [n["text"] for n in tools["notes"].notes] == ["Dentist"]
     assert len(backend.calls) == 1
 
 
 def test_read_tool_gets_second_round(env):
     _, tools, proto = env
-    tools["calendar"].create("Dentist", "2030-01-01T10:00:00")
+    tools["notes"].run("add", {"text": "Dentist", "due": "2030-01-01T10:00:00"})
     agent, backend = make_agent(tools, ["Let me check. " + LIST, "You have: Dentist."])
     reply = agent.respond(proto.open_owner_session("t"), "what reminders?")
     assert reply == "Let me check.\n\nYou have: Dentist."
@@ -62,23 +62,23 @@ def test_second_round_tool_calls_not_executed(env):
     _, tools, proto = env
     agent, backend = make_agent(tools, [LIST, "Done " + CREATE])
     agent.respond(proto.open_owner_session("t"), "x")
-    assert tools["calendar"].list_upcoming() == []
+    assert tools["notes"].notes == []
     assert len(backend.calls) == 2
 
 
 def test_unterminated_tag_not_executed(env):
     _, tools, proto = env
-    agent, _ = make_agent(tools, ['Sure <tool>{"name":"calendar","action":"create","args":{"ti'])
+    agent, _ = make_agent(tools, ['Sure <tool>{"name":"notes","action":"add","args":{"te'])
     assert agent.respond(proto.open_owner_session("t"), "x") == "Sure"
-    assert tools["calendar"].list_upcoming() == []
+    assert tools["notes"].notes == []
 
 
 def test_bad_args_notice_shown(env):
     _, tools, proto = env
-    bad = '<tool>{"name":"calendar","action":"create","args":{"title":"X","remind_at":"someday"}}</tool>'
+    bad = '<tool>{"name":"notes","action":"add","args":{"text":"X","due":"someday"}}</tool>'
     agent, _ = make_agent(tools, ["Ok " + bad])
     reply = agent.respond(proto.open_owner_session("t"), "x")
-    assert "Couldn't run calendar.create" in reply
+    assert "Couldn't run notes.add" in reply
 
 
 def test_stream_never_shows_tags(env):
@@ -101,13 +101,13 @@ def test_run_tool_outcomes(env):
     _, tools, proto = env
     agent, _ = make_agent(tools, [])
     owner = proto.open_owner_session("t")
-    assert agent.run_tool(owner, "calendar", "list", {}).ok
+    assert agent.run_tool(owner, "notes", "list", {}).ok
     assert agent.run_tool(owner, "email", "send", {}).error_type == "unknown"
-    assert agent.run_tool(owner, "calendar", "delete", {"id": "x"}).error_type == "bad_args"
-    limited = proto._session("peer:x", Scope(["tool:calendar:list"]), "peer:x")
-    created = agent.run_tool(limited, "calendar", "create", {"title": "a", "remind_at": "2030-01-01"})
+    assert agent.run_tool(owner, "notes", "delete", {"id": "x"}).error_type == "bad_args"
+    limited = proto._session("peer:x", Scope(["tool:notes:list"]), "peer:x")
+    created = agent.run_tool(limited, "notes", "add", {"text": "a", "due": "2030-01-01"})
     assert created.error_type == "denied"
-    assert agent.run_tool(limited, "calendar", "list", {}).error_type == "withheld"
+    assert agent.run_tool(limited, "notes", "list", {}).error_type == "withheld"
 
 
 def test_adapter_failure_refuses_turn(env):
@@ -129,15 +129,15 @@ def test_adapters_loaded_for_session(env):
 
 def test_history_shows_model_its_working_calls_not_failure_notices(env):
     _, tools, proto = env
-    bad = '<tool>{"name":"calendar","action":"read"}</tool>'
+    bad = '<tool>{"name":"notes","action":"read"}</tool>'
     agent, backend = make_agent(tools, [CREATE + bad, "next"])
     session = proto.open_owner_session("t")
     shown = agent.respond(session, "remind me")
-    assert "Done." in shown and "Couldn't run calendar.read" in shown  # the user sees both
+    assert "Done." in shown and "Couldn't run notes.read" in shown  # the user sees both
     agent.respond(session, "and then?")
     replayed = backend.calls[1][2]  # [system, user, assistant, user]
     assert replayed["role"] == "assistant"
-    assert '"action": "create"' in replayed["content"] and "Couldn't" not in replayed["content"]
+    assert '"action": "add"' in replayed["content"] and "Couldn't" not in replayed["content"]
     assert '"read"' not in replayed["content"]
 
 

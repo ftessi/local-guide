@@ -56,9 +56,12 @@ def validate_args(action: Action, args) -> dict:
 
 
 class Tool:
+    """Tools are installables: they live in the extensions repo under tools/<name>/ (see README.md)."""
     name: str = ""
-    compartment: str = "private"
+    compartment: str = "private"  # whose data this is; overridable in installables.yaml
     actions: dict = {}
+    options: tuple = ()           # extra setting names accepted in installables.yaml
+    settings: dict = {}           # those settings' values, set before setup()
 
     def setup(self, data_dir: Path, notify: Notify | None) -> None:
         """Called once with this tool's own data folder and a way to notify the owner."""
@@ -67,4 +70,4 @@ class Tool:
         raise NotImplementedError
 
     def background(self) -> None:
-        """Optional: called about once a minute by the owner server."""
+        """Optional: called about once a minute while `python -m localagent serve` runs."""

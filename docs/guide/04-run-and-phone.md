@@ -10,15 +10,15 @@ python -m localagent chat
 
 - Loads the model (seconds to a minute), then shows `You:`.
 - `reset` clears the conversation from what the model sees (it stays saved in `memory/`). `exit` or Ctrl+C quits.
-- Reminders work here too; they *fire* only while the server (4.2) runs.
+- Reminders can be created here too; they *fire* only while `serve` (4.2) runs.
 
-## 4.2 Web server (phone app + reminders + push)
+## 4.2 Serve: phone app, reminders, push
 
 ```bash
 python -m localagent serve
 ```
 
-Wait for `Uvicorn running on http://127.0.0.1:8000`, open that URL, and enter your `AGENT_SECRET` (from `my-agent/.env`).
+This starts every connection in `installables.yaml` (by default `phone`) and fires due reminders every minute. Wait for `Phone app: http://127.0.0.1:8000`, open that URL, and enter your `AGENT_SECRET` (from `my-agent/.env`).
 
 `scripts\start_server.bat` does the same and can be double-clicked or run by Task Scheduler.
 
@@ -26,32 +26,42 @@ Both commands take `--agent <folder>` (or set the `LOCALAGENT_DIR` environment v
 
 ## 4.3 Reach it from your phone (Cloudflare Tunnel)
 
-You need a domain on a free Cloudflare account. Full walkthrough: [`../Setup/cloudflare-tunnel-setup.md`](../Setup/cloudflare-tunnel-setup.md). In short:
+You need a domain on a free Cloudflare account. Full walkthrough: [`../Setup/cloudflare-tunnel-setup.md`](../Setup/cloudflare-tunnel-setup.md). In short, once:
 
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create local-agent
 cloudflared tunnel route dns local-agent yourdomain.com
-cloudflared tunnel run local-agent          # or: cloudflared service install
 ```
 
-with `~/.cloudflared/config.yml` pointing `yourdomain.com` at `http://localhost:8000`.
+with `~/.cloudflared/config.yml` pointing `yourdomain.com` at `http://localhost:8000`. Then let `serve` run the tunnel for you by adding the `cloudflare` connection:
+
+```yaml
+# my-agent/installables.yaml
+connections:
+  phone:
+    port: 8000
+  cloudflare:
+    tunnel: local-agent
+```
+
+and `python -m localagent install`. (Or skip it and run `cloudflared` as a Windows service: `cloudflared service install`.)
 
 Then on the phone, open `https://yourdomain.com`, choose **Add to Home Screen**, and allow notifications. On iPhone, notifications only work once the app is installed to the Home Screen (iOS 16.4+).
 
-Keep `host: 127.0.0.1` in `agent.yaml`: the tunnel connects locally, so your agent is never exposed on your network.
+Keep `host: 127.0.0.1` for the phone connection: the tunnel connects locally, so your agent is never exposed on your network.
 
 ## 4.4 Startup checklist
 
 | Order | What | Ready when |
 |---|---|---|
-| 1 | `python -m localagent serve` | `Uvicorn running on …` |
-| 2 | `cloudflared tunnel run local-agent` (or the service) | `Registered tunnel connection` |
+| 1 | `python -m localagent serve` | `Phone app: http://…` (and `Cloudflare tunnel … started`) |
+| 2 | Only without the cloudflare connection: `cloudflared tunnel run local-agent` (or the service) | `Registered tunnel connection` |
 | 3 | Open the app on the phone | Header says **Connected** |
 
 ## 4.5 Calendar from scripts (REST)
 
-Every tool action is also an endpoint. All of them need `Authorization: Bearer <AGENT_SECRET>`.
+With the phone connection, every tool action is also an endpoint. All of them need `Authorization: Bearer <AGENT_SECRET>`.
 
 | Method | Path | Body |
 |---|---|---|
@@ -76,5 +86,7 @@ Read actions use GET; actions that change data must use POST.
 | `[error] Could not load adapters …` | A trained adapter in `training/adapters/` is broken or `peft` isn't installed. The agent refuses rather than running without it; remove the folder or `pip install peft` |
 | Phone: "Connection error" | Wrong token (clear site data), server not running, or tunnel down |
 | Reminder created but no notification | Notifications denied on the phone, or the iOS app not installed to the Home Screen |
-| `Address already in use` | Another server is on port 8000; close it or change `server.port` |
+| `Address already in use` | Another server is on port 8000; close it or change the phone `port` in `installables.yaml` |
+| `… is listed in installables.yaml but not installed` | Run `python -m localagent install` |
+| `cloudflared is not installed or not on PATH` | Install cloudflared (4.3), or remove the `cloudflare` connection |
 | Agent says it set a reminder but nothing happened | Look for a `(Couldn't run calendar.create: …)` line in the reply; small models sometimes get the format wrong. Try a bigger model |

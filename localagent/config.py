@@ -1,4 +1,4 @@
-"""Loads an agent folder (agent.yaml + .env) into an AgentConfig."""
+"""Loads an agent folder (agent.yaml + installables.yaml + .env) into an AgentConfig."""
 import os
 import re
 from dataclasses import dataclass, field
@@ -11,7 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AGENT_DIR = REPO_ROOT / "my-agent"
 QUANTIZATIONS = ("4bit", "fp16", "none")
 COMPARTMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-TOP_LEVEL_KEYS = {"name", "model", "compartments", "tools", "memory", "server"}
+TOP_LEVEL_KEYS = {"name", "model", "compartments", "memory"}
+EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+DEFAULT_EXTENSIONS_SOURCE = "https://github.com/ftessi/local-guide-extensions.git"
 
 
 class ConfigError(Exception):
@@ -27,15 +29,22 @@ class ModelConfig:
 
 
 @dataclass
+class Installables:
+    """What the agent uses beyond the core, from installables.yaml. Presence in the file = enabled."""
+    source: str = DEFAULT_EXTENSIONS_SOURCE  # git URL, or a local folder (relative to the agent folder)
+    ref: str = "main"
+    tools: dict[str, dict] = field(default_factory=dict)
+    connections: dict[str, dict] = field(default_factory=dict)
+
+
+@dataclass
 class AgentConfig:
     agent_dir: Path
     name: str = "my-agent"
     model: ModelConfig = field(default_factory=ModelConfig)
     compartments: list[str] = field(default_factory=lambda: ["private", "shared"])
-    tools: dict[str, dict] = field(default_factory=dict)
+    installables: Installables = field(default_factory=Installables)
     history_turns: int = 20
-    host: str = "127.0.0.1"
-    port: int = 8000
     env: dict[str, str] = field(default_factory=dict)
 
     def get_env(self, key: str, default: str = "") -> str:
@@ -65,21 +74,40 @@ def _section(raw: dict, key: str) -> dict:
     return value
 
 
-def _normalize_tools(raw_tools) -> dict[str, dict]:
-    if raw_tools is None:
+def _extensions(raw, kind: str) -> dict[str, dict]:
+    if raw is None:
         return {}
-    if not isinstance(raw_tools, dict):
-        raise ConfigError("'tools' in agent.yaml must map tool names to settings")
-    tools = {}
-    for name, value in raw_tools.items():
-        if value is None or value is True:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"'{kind}' in installables.yaml must map names to settings")
+    result = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not EXTENSION_NAME_RE.match(name):
+            raise ConfigError(f"Invalid {kind[:-1]} name '{name}' in installables.yaml")
+        if value is None:
             value = {}
-        elif value is False:
-            value = {"enabled": False}
         if not isinstance(value, dict):
-            raise ConfigError(f"tools.{name} must be a mapping, true or false")
-        tools[str(name)] = value
-    return tools
+            raise ConfigError(f"{kind}.{name} in installables.yaml must be a mapping of settings (or empty)")
+        result[name] = value
+    return result
+
+
+def load_installables(agent_dir: Path) -> Installables:
+    path = Path(agent_dir) / "installables.yaml"
+    if not path.is_file():
+        return Installables()
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        raise ConfigError(f"installables.yaml is not valid YAML: {e}") from e
+    if not isinstance(raw, dict):
+        raise ConfigError("installables.yaml must be a mapping of settings")
+    unknown = set(raw) - {"source", "ref", "tools", "connections"}
+    if unknown:
+        raise ConfigError(f"Unknown setting(s) in installables.yaml: {', '.join(sorted(unknown))}")
+    return Installables(source=str(raw.get("source") or DEFAULT_EXTENSIONS_SOURCE),
+                        ref=str(raw.get("ref") or "main"),
+                        tools=_extensions(raw.get("tools"), "tools"),
+                        connections=_extensions(raw.get("connections"), "connections"))
 
 
 def load_config(agent_dir: Path) -> AgentConfig:
@@ -92,6 +120,10 @@ def load_config(agent_dir: Path) -> AgentConfig:
         raise ConfigError(f"agent.yaml is not valid YAML: {e}") from e
     if not isinstance(raw, dict):
         raise ConfigError("agent.yaml must be a mapping of settings")
+    moved = {"tools", "server"} & set(raw)
+    if moved:
+        raise ConfigError(f"'{', '.join(sorted(moved))}' moved from agent.yaml to installables.yaml "
+                          "(tools: and connections: phone: host/port). See README.md.")
     unknown = set(raw) - TOP_LEVEL_KEYS
     if unknown:
         raise ConfigError(f"Unknown setting(s) in agent.yaml: {', '.join(sorted(unknown))}")
@@ -120,16 +152,13 @@ def load_config(agent_dir: Path) -> AgentConfig:
         raise ConfigError("'compartments' must include 'private' (owner conversations are stored there)")
 
     memory = _section(raw, "memory")
-    server = _section(raw, "server")
     env = {k: v for k, v in dotenv_values(agent_dir / ".env").items() if v is not None}
     return AgentConfig(
         agent_dir=agent_dir,
         name=str(raw.get("name") or agent_dir.name),
         model=model,
         compartments=list(compartments),
-        tools=_normalize_tools(raw.get("tools")),
+        installables=load_installables(agent_dir),
         history_turns=int(memory.get("history_turns", 20)),
-        host=str(server.get("host", "127.0.0.1")),
-        port=int(server.get("port", 8000)),
         env=env,
     )

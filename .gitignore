@@ -13,6 +13,9 @@ calendar.db
 *.db
 knowledge/private/
 
+# ── Installed tools and connections (python -m localagent install) ──
+extensions/
+
 # ── Python / tooling ───────────────────────────────────
 .venv/
 __pycache__/

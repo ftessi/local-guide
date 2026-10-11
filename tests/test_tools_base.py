@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 import pytest
 
 from localagent.agent.tools.base import Action, ToolArgsError, validate_args
-from localagent.agent.tools.registry import ToolConfigError, load_tools
 
 ACT = Action("x", {"title": "str", "n": "int", "at": "iso-datetime"}, kind="write")
 
@@ -33,25 +32,3 @@ def test_iso_datetime_timezone_converted_to_local_naive():
 
 def test_iso_datetime_date_only_is_midnight():
     assert validate_args(Action("x", {"at": "iso-datetime"}), {"at": "2026-10-12"})["at"] == "2026-10-12T00:00:00"
-
-
-def test_registry_loads_calendar(tmp_path):
-    tools = load_tools({"calendar": {}}, tmp_path, lambda t, b: None, ["private", "shared"])
-    assert list(tools) == ["calendar"]
-    assert (tmp_path / "calendar/calendar.db").exists()
-
-
-def test_registry_disabled_and_override(tmp_path):
-    assert load_tools({"calendar": {"enabled": False}}, tmp_path, None, ["private"]) == {}
-    tools = load_tools({"calendar": {"compartment": "shared"}}, tmp_path, None, ["private", "shared"])
-    assert tools["calendar"].compartment == "shared"
-
-
-@pytest.mark.parametrize("cfg, fragment", [
-    ({"nope": {}}, "Unknown tool"),
-    ({"calendar": {"compartment": "family"}}, "family"),
-    ({"calendar": {"colour": "red"}}, "colour"),
-])
-def test_registry_errors(tmp_path, cfg, fragment):
-    with pytest.raises(ToolConfigError, match=fragment):
-        load_tools(cfg, tmp_path, None, ["private", "shared"])

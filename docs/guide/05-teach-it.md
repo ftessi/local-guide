@@ -32,18 +32,17 @@ Items with `status: active` are shown to the model. Set `status: done` to retire
 
 ## Tools: what it can do
 
-Enabled in `agent.yaml`:
+Listed in `installables.yaml` (then `python -m localagent install`):
 
 ```yaml
 tools:
   calendar:
-    enabled: true
     compartment: private   # whose data the reminders are
 ```
 
 The model calls tools by writing a tag at the end of its reply. You never see the tag, only the result. Try: *"remind me to call mom tomorrow at 6pm"*, then *"what reminders do I have?"*.
 
-Adding a new tool is a small Python package; see [`../architecture.md`](../architecture.md#adding-a-tool).
+`python -m localagent list` shows the tools available. Writing a new one is a small Python package in the extensions repo; see the [README](../../README.md#writing-a-new-tool).
 
 ## Who sees what
 

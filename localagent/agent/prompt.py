@@ -9,9 +9,8 @@ BASE_PROMPT = "You are a helpful local AI assistant running on your owner's own 
 TOOLS_INTRO = """You can use tools. To use one, write one short sentence for the user, then the tool tag on its own line.
 The tag is JSON inside <tool>...</tool>, with "name", "action" and "args". Nothing comes after the tag.
 
-Example:
-User: {request}
-Assistant: Sure, one moment.
+Example: if the user says "{request}", your whole reply is these two lines:
+Sure, one moment.
 {tag}
 
 If no tool is needed, just answer normally with no tag.
