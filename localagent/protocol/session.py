@@ -28,6 +28,7 @@ def model_slug(model_id: str) -> str:
 
 
 RESET_EVENT = "history_reset"
+PLAIN_TURNS = 2  # with tools, how many of the latest turns answered without one are replayed (see history())
 
 
 def _valid_transcript(transcript) -> bool:
@@ -67,8 +68,17 @@ class Session:
         resets = [i for i, r in enumerate(records) if r.get("event") == RESET_EVENT]
         if resets:  # history starts after the latest reset, even across restarts
             records = records[resets[-1] + 1:]
+        records = records[-n:]
+        if self.tools():
+            # Small models copy their own earlier answers over the system prompt: a few turns of guesses or
+            # "I can't browse" and they stop calling tools. So only the latest tool-less turns are replayed;
+            # turns that really used a tool are kept (they show working calls).
+            plain = [i for i, r in enumerate(records)
+                     if not any(c.get("ok") for c in r.get("tool_calls") or [] if isinstance(c, dict))]
+            dropped = set(plain[:-PLAIN_TURNS])
+            records = [r for i, r in enumerate(records) if i not in dropped]
         messages = []
-        for record in records[-n:]:
+        for record in records:
             if isinstance(record.get("user"), str) and isinstance(record.get("assistant"), str):
                 messages.append({"role": "user", "content": record["user"]})
                 # transcript = what the model itself said and was told (tool tags, tool results);

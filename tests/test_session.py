@@ -117,3 +117,35 @@ def test_reset_survives_a_restart(agent_dir):
     assert [m["content"] for m in restarted.history(10)] == ["after", "fine"]
     records = [i.content for i in restarted.vault.read("memory", ["private"])]
     assert records[0]["assistant"] == "invented answer"  # kept on disk (training, audit), just not replayed
+
+
+def _turn(n, used_tool):
+    return {"user": f"u{n}", "assistant": f"a{n}",
+            "tool_calls": [{"name": "calendar", "action": "list", "ok": True, "error": ""}] if used_tool else []}
+
+
+def test_with_tools_only_the_latest_answers_without_a_tool_are_replayed(agent_dir):
+    """Older tool-less answers (guesses, "I can't browse") become examples a small model copies instead of
+    calling its tools; turns that really used a tool are kept."""
+    s = make(agent_dir, ["all"])
+    for record in [_turn(1, True), _turn(2, False), _turn(3, False), _turn(4, False), _turn(5, False)]:
+        s.record(record)
+    assert [m["content"] for m in s.history(10)] == ["u1", "a1", "u4", "a4", "u5", "a5"]
+
+
+def test_a_turn_whose_tool_calls_all_failed_counts_as_tool_less(agent_dir):
+    s = make(agent_dir, ["all"])
+    failed = {"user": "u0", "assistant": "a0",
+              "tool_calls": [{"name": "calendar", "action": "list", "ok": False, "error": "x"}]}
+    for record in [failed, _turn(1, False), _turn(2, False)]:
+        s.record(record)
+    assert [m["content"] for m in s.history(10)] == ["u1", "a1", "u2", "a2"]
+
+
+def test_without_tools_every_turn_is_replayed(agent_dir):
+    s = Session(principal="owner", scope=Scope(["all"]), memory_compartment="private",
+                vault=Vault(agent_dir, ["private", "shared"]), audit=Audit(agent_dir / "audit.log"),
+                tools={}, adapters_dir=agent_dir / "training/adapters")
+    for n in range(5):
+        s.record(_turn(n, False))
+    assert len(s.history(10)) == 10
