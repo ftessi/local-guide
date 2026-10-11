@@ -43,7 +43,7 @@ def test_write_tool_executed_and_hidden(env):
     _, tools, proto = env
     agent, backend = make_agent(tools, ["Reminder set! " + CREATE])
     reply = agent.respond(proto.open_owner_session("t"), "remind me")
-    assert reply == "(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"  # what really ran; the text written before the call is dropped
+    assert reply == "(Using the notes tool... this can take a moment.)\n\n(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"  # what really ran; the text written before the call is dropped
     assert [n["text"] for n in tools["notes"].notes] == ["Dentist"]
     assert len(backend.calls) == 1
 
@@ -53,7 +53,7 @@ def test_read_tool_gets_second_round(env):
     tools["notes"].run("add", {"text": "Dentist", "due": "2030-01-01T10:00:00"})
     agent, backend = make_agent(tools, ["Let me check. " + LIST, "You have: Dentist."])
     reply = agent.respond(proto.open_owner_session("t"), "what reminders?")
-    assert reply == "(used notes.list)\n\nYou have: Dentist."
+    assert reply == "(Using the notes tool... this can take a moment.)\n\n(used notes.list)\n\nYou have: Dentist."
     assert backend.calls[1][-1]["content"].startswith("Tool results")
     assert "Dentist" in backend.calls[1][-1]["content"]
 
@@ -69,7 +69,8 @@ def test_second_round_tool_calls_not_executed(env):
 def test_unterminated_tag_not_executed(env):
     _, tools, proto = env
     agent, _ = make_agent(tools, ['Sure <tool>{"name":"notes","action":"add","args":{"te'])
-    assert agent.respond(proto.open_owner_session("t"), "x") == "Sure"
+    reply = agent.respond(proto.open_owner_session("t"), "x")
+    assert reply.endswith("Sure") and "(The notes call was cut off or malformed, so nothing ran.)" in reply
     assert tools["notes"].notes == []
 
 
@@ -87,7 +88,7 @@ def test_stream_never_shows_tags(env):
     chunks = list(agent.respond_stream(proto.open_owner_session("t"), "x"))
     assert "<tool" not in "".join(chunks)
     streamed = "".join(chunks).replace(" \n", "\n")  # the space before a hidden tag may stream out
-    assert streamed == "(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"
+    assert streamed == "(Using the notes tool... this can take a moment.)\n\n(used notes.add: text=\"Dentist\", due=\"2030-01-01T10:00:00\")"
 
 
 def test_history_included_next_turn(env):
@@ -271,3 +272,31 @@ def test_plain_answer_without_tools_is_shown_whole(env):
     _, tools, proto = env
     agent, _ = make_agent(tools, ["Just a normal answer."])
     assert "".join(agent.respond_stream(proto.open_owner_session("t"), "hi")) == "Just a normal answer."
+
+
+class AnnouncingBackend(FakeBackend):
+    """Records how much of the reply had been generated when the agent printed something."""
+
+    def __init__(self, replies):
+        super().__init__(replies=replies)
+        self.generated = 0
+
+    def generate_stream(self, messages, max_new_tokens=256):
+        for chunk in super().generate_stream(messages, max_new_tokens):
+            self.generated += len(chunk)
+            yield chunk
+
+
+def test_tool_use_is_announced_while_the_model_is_still_writing(env):
+    _, tools, proto = env
+    reply = 'One moment. <tool>{"name":"notes","action":"list","args":{}}</tool> and some trailing words here'
+    backend = AnnouncingBackend([reply, "You have no notes."])
+    agent = Agent(backend, tools, model_id="org/model", history_turns=5, clock=lambda: NOW)
+    chunks, generated_at = [], []
+    for chunk in agent.respond_stream(proto.open_owner_session("t"), "my notes?"):
+        chunks.append(chunk)
+        generated_at.append(backend.generated)
+    first = next(i for i, c in enumerate(chunks) if "Using the notes tool" in c)
+    assert generated_at[first] < len(reply)  # announced before the model finished its first reply
+    used = next(i for i, c in enumerate(chunks) if "(used notes.list)" in c)
+    assert first < used and "".join(chunks).endswith("You have no notes.")

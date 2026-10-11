@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Generator, Iterator
 
 from localagent.agent.prompt import build_system_prompt
-from localagent.agent.toolcalls import VisibleText, parse_tool_calls, strip_tool_tags
+from localagent.agent.toolcalls import VisibleText, parse_tool_calls, strip_tool_tags, tool_being_called
 from localagent.agent.tools.base import ToolArgsError, validate_args
 from localagent.protocol.session import WITHHELD, ScopeError, Session, UnknownToolError
 from localagent.runtime.base import Backend
@@ -160,10 +160,15 @@ class Agent:
                 hold_back = round_no < MAX_ROUNDS and bool(views)
                 if round_no > 1 and shown:
                     yield "\n\n"
-                visible, parts = VisibleText(), []
+                visible, parts, announced = VisibleText(), [], False
                 messages = _fit(system_message, history, this_turn, self.max_prompt_chars)
                 for chunk in self.backend.generate_stream(messages, self.max_new_tokens):
                     parts.append(chunk)
+                    if hold_back and not announced:
+                        name = tool_being_called("".join(parts))
+                        if name:  # say so right away: the tool and the answer after it take a while
+                            announced = True
+                            yield notice([f"(Using the {name} tool... this can take a moment.)"])
                     out = "" if hold_back else visible.feed(chunk)
                     if out:
                         shown = True
@@ -178,6 +183,8 @@ class Agent:
                 for error in errors:
                     log.warning("Ignored tool call: %s", error)
                 if hold_back:
+                    if announced and not calls:
+                        yield notice([f"(The {name} call was cut off or malformed, so nothing ran.)"])
                     if calls:
                         said = ""
                     elif said:

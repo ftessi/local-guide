@@ -1,4 +1,4 @@
-from localagent.agent.toolcalls import ToolCall, VisibleText, parse_tool_calls, strip_tool_tags
+from localagent.agent.toolcalls import ToolCall, VisibleText, parse_tool_calls, strip_tool_tags, tool_being_called
 
 CREATE = '<tool>{"name":"calendar","action":"create","args":{"title":"X","remind_at":"2026-10-07T10:00:00"}}</tool>'
 
@@ -72,3 +72,10 @@ def test_visible_text_hides_native_tag():
     v = VisibleText()
     out = "".join(v.feed(c) for c in ["Sure <tool", "_call>{}", " more"]) + v.flush()
     assert out == "Sure "
+
+
+def test_tool_being_called_is_known_before_the_tag_is_finished():
+    assert tool_being_called('Sure. <tool>{"name":"web","act') == "web"
+    assert tool_being_called('<tool_call>{"name": "calendar.create"') == "calendar"
+    assert tool_being_called('Sure. <tool>{"na') is None
+    assert tool_being_called('no tag "name":"web"') is None
