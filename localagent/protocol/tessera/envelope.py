@@ -38,7 +38,10 @@ def format_time(dt: datetime) -> str:
 
 
 def parse_time(text: str) -> datetime:
-    return datetime.strptime(text, TIME_FORMAT).replace(tzinfo=timezone.utc)
+    parsed = datetime.strptime(text, TIME_FORMAT).replace(tzinfo=timezone.utc)
+    if format_time(parsed) != text:
+        raise ValueError(f"{text!r} is not the canonical time spelling")
+    return parsed
 
 
 def encode(env: dict) -> bytes:
@@ -67,9 +70,9 @@ def check_shape(env) -> None:
 
     if not isinstance(env, dict) or set(env) != FIELDS:
         bad("an envelope has exactly the fields " + ", ".join(sorted(FIELDS)))
-    if env["tessera"] != VERSION:
+    if not isinstance(env["tessera"], str) or env["tessera"] != VERSION:
         bad(f"unsupported version {env['tessera']!r}")
-    if env["type"] not in BODIES:
+    if not isinstance(env["type"], str) or env["type"] not in BODIES:
         bad(f"unknown type {env['type']!r}")
     for f in ("session", "from", "to", "prev", "time", "sig"):
         if not isinstance(env[f], str):
@@ -102,8 +105,16 @@ def check_shape(env) -> None:
     if t == "welcome" and (set(body["limits"]) != {"asks", "ask_chars"}
                            or not all(_is(v, int) and v >= 0 for v in body["limits"].values())):
         bad("limits are {asks, ask_chars}, both integers")
-    if t == "card" and not all(isinstance(v, str) for v in body["versions"]):
-        bad("versions are text")
+    if t == "welcome":
+        try:
+            parse_time(body["expires"])
+        except ValueError:
+            bad("'expires' must look like 2026-10-11T13:00:00Z")
+    if t == "card":
+        if not AGENT_ID_RE.fullmatch(body["agent_id"]):
+            bad("'agent_id' must be an agent id")
+        if not all(isinstance(v, str) for v in body["versions"]):
+            bad("versions are text")
 
 
 def _no_duplicate_keys(pairs):
@@ -123,7 +134,7 @@ def decode(raw: bytes, now: datetime) -> dict:
         raise EnvelopeError("too_large", f"envelopes are at most {MAX_BYTES} bytes")
     try:
         env = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicate_keys, parse_constant=_no_constants)
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         raise EnvelopeError("malformed", "not a JSON object") from None
     check_shape(env)
     try:
@@ -141,6 +152,6 @@ def sender_of(raw: bytes) -> str:
     """Best-effort sender of an envelope that failed its checks, only to address the error reply. Never trusted."""
     try:
         value = json.loads(raw.decode("utf-8")).get("from")
-    except (UnicodeDecodeError, ValueError, AttributeError):
+    except (UnicodeDecodeError, ValueError, AttributeError, RecursionError):
         return ""
     return value if isinstance(value, str) and AGENT_ID_RE.fullmatch(value) else ""

@@ -61,7 +61,12 @@ def test_size_limit():
 @pytest.mark.parametrize("mutate", [
     lambda e: b"not json",
     lambda e: b'{"a": 1, "a": 2}',
-    lambda e: encode({k: v for k, v in e.items() if k != "nonce"} | {"extra": 1}),
+    lambda e: encode({**e, "extra": 1}),
+    lambda e: encode(resign({**e, "type": []})),
+    lambda e: encode(resign({**e, "type": {"a": 1}})),
+    lambda e: encode(resign({**e, "tessera": []})),
+    lambda e: encode(resign({**e, "time": "2026-1-1T1:2:3Z"})),
+    lambda e: encode(resign({**e, "time": "２０２６-10-11T12:00:00Z"})),
     lambda e: encode(resign({**e, "body": {**e["body"], "extra": 1}})),
     lambda e: encode(resign({**e, "tessera": "9.9"})),
     lambda e: encode(resign({**e, "type": "shout"})),
@@ -106,6 +111,41 @@ def test_hash_includes_the_signature_and_changes_with_anything():
 def test_sender_of_is_best_effort():
     assert sender_of(encode(hello())) == B.agent_id
     assert sender_of(b"garbage") == "" and sender_of(b'{"from": "x"}') == ""
+
+
+def test_deep_nesting_is_malformed_not_a_crash():
+    raw = b"[" * 60000
+    assert len(raw) < MAX_BYTES
+    assert code_of(raw) == "malformed"
+    assert sender_of(raw) == ""
+    assert sender_of(b'{"from": ' + b"[" * 60000) == ""
+
+
+def test_parse_time_accepts_only_the_canonical_spelling():
+    with pytest.raises(ValueError):
+        parse_time("2026-1-1T1:2:3Z")
+    with pytest.raises(ValueError):
+        parse_time("２０２６-10-11T12:00:00Z")
+    assert parse_time("2026-10-11T12:00:00Z") == NOW
+
+
+def test_welcome_expires_and_card_agent_id_are_checked():
+    welcome = dict(session="s-1", granted_level=1, limits={"asks": 50, "ask_chars": 1000})
+    env = sign_envelope(A, type="welcome", session="", to=B.agent_id, seq=1, prev="",
+                        body={**welcome, "expires": "yesterday"}, now=NOW)
+    assert code_of(encode(env)) == "malformed"
+    env = sign_envelope(A, type="card", session="", to=B.agent_id, seq=1, prev="",
+                        body={"agent_id": "someone", "name": "A", "versions": ["0.1"]}, now=NOW)
+    assert code_of(encode(env)) == "malformed"
+
+
+def test_verify_record_raises_only_envelope_errors():
+    h = hello()
+    missing_sig = {k: v for k, v in h.items() if k != "sig"}
+    for record in ([missing_sig], ["not a dict"], [{**h, "seq": 2 ** 60}]):
+        with pytest.raises(EnvelopeError) as e:
+            verify_record(record)
+        assert e.value.code == "malformed"
 
 
 def test_chain():

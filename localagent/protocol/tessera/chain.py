@@ -2,8 +2,8 @@
 from dataclasses import dataclass, field
 
 from localagent.protocol.identity import verify
-from localagent.protocol.tessera.canonical import canonical
-from localagent.protocol.tessera.envelope import EnvelopeError, envelope_hash
+from localagent.protocol.tessera.canonical import CanonicalError, canonical
+from localagent.protocol.tessera.envelope import EnvelopeError, check_shape, envelope_hash
 
 
 @dataclass
@@ -26,10 +26,14 @@ class Chain:
 
 
 def verify_record(envelopes: list[dict]) -> None:
-    """Checks a stored record end to end: every signature and every link. Raises EnvelopeError."""
+    """Checks a stored record end to end: every shape, signature and link. Raises only EnvelopeError."""
     chain = Chain()
     for env in envelopes:
-        signed = canonical({k: v for k, v in env.items() if k != "sig"})
+        check_shape(env)
+        try:
+            signed = canonical({k: v for k, v in env.items() if k != "sig"})
+        except CanonicalError as e:
+            raise EnvelopeError("malformed", str(e)) from None
         if not verify(env["from"], signed, env["sig"]):
-            raise EnvelopeError("bad_signature", f"envelope {env.get('seq')} has a bad signature")
+            raise EnvelopeError("bad_signature", f"envelope {env['seq']} has a bad signature")
         chain.append(env)
