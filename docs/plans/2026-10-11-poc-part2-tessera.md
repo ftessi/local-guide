@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Two LocalAgents connect through Tessera v0.1 level 1 (Ask): signed, hash-chained envelopes over HTTP; the owner accepts connection requests; a peer only ever reaches a Tessera-facing agent folder that holds connection adapters and nothing private.
+**Goal:** Two LocalAgents connect through Tessera v0.1 level 1 (Ask): signed, hash-chained envelopes over HTTP; the owner accepts connection requests; a peer only ever reaches a Tessera-facing agent folder, one per connection, that holds that connection's adapter and nothing private.
 
 **Architecture:** Pure protocol logic (canonical JSON, signatures, envelopes, chain, test vectors) lives in `localagent/protocol/tessera/` and has no network or model. The guard (`protocol/guard.py`) gains the new peer policy, connection requests, peer sessions and records. The transport-free endpoint core `handle(bytes) -> bytes`, a thin HTTP binding and the requesting client live in `localagent/connect/peer/tessera/`. The `tessera-protocol` repository holds only the specification, a JSON Schema and the test vectors.
 
@@ -18,7 +18,7 @@
 - `refuse` and `decline` bodies are always `{}`; `answer.binding` is always `false`.
 - Agent id = base64url (no padding) of the 32-byte Ed25519 public key: 43 characters `[A-Za-z0-9_-]`.
 - HTTP binding: `POST /tessera`, `GET /tessera/card`, status 200 for every protocol reply.
-- Peer sessions get exactly: `adapter:<connection>` + `memory:peer:<id>`. Never tools, knowledge, work, or the `private` adapter.
+- One Tessera-facing agent per connection (spec D14): its `agent.yaml` has exactly one compartment, not `private`. Peer sessions get exactly `adapter:<that compartment>` + `memory:peer:<id>`. Never tools, knowledge, work, or the `private` adapter. Peers in `policy.yaml` are `{name, level}` (no connection field).
 - Commit messages: imperative sentence, blank line, body if useful, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Pushing anything, creating a GitHub repository, or opening ports to the internet is outward-facing: ask the owner first.
 
@@ -42,7 +42,7 @@
 | `localagent/protocol/tessera/envelope.py` (new) | constants, `sign_envelope`, `decode` (all checks), `encode`, `envelope_hash`, times, `sender_of` |
 | `localagent/protocol/tessera/chain.py` (new) | `Chain` (seq/prev), `verify_record` |
 | `localagent/protocol/tessera/vectors.py` (new) | builds the published test vectors |
-| `localagent/protocol/policy.py` (rewrite) | new `peers` format, `PeerEntry`, `save_policy`, `make_peer_entry` |
+| `localagent/protocol/policy.py` (rewrite) | new `peers` format `{name, level}`, `PeerEntry`, `save_policy`, `make_peer_entry` |
 | `localagent/vault/store.py` (modify) | `append_tessera`, `read_tessera` |
 | `localagent/protocol/guard.py` (modify) | `peer_grant`, `open_peer_session`, requests, accept/reject/remove, records, policy reload |
 | `localagent/protocol/handshake.py` (delete) | replaced by Tessera |
@@ -51,12 +51,12 @@
 | `localagent/connect/peer/tessera/http.py` (new) | `TesseraServer`, `post()` |
 | `localagent/connect/peer/tessera/client.py` (new) | `TesseraClient`, `Reply` |
 | `localagent/connect/peer/tessera/__init__.py` (new) | `TesseraConnection` (built-in), `check_tessera_folder` |
-| `localagent/config.py`, `localagent/extensions.py`, `localagent/installer.py` (modify) | `builtin: true` connections |
+| `localagent/config.py`, `localagent/extensions.py`, `localagent/installer.py` (modify) | `builtin: true` connections; `agent.yaml` without `private` for a one-compartment agent |
 | `localagent/tessera_cli.py` (new) | `id`, `peers`, `connect`, `ask`; `make_asker` for chat |
 | `localagent/__main__.py`, `localagent/connect/owner/terminal.py` (modify) | commands; `/ask` in chat |
 | `scripts/tessera_vectors.py` (new), `tests/data/tessera_vectors_v0.1.json` (new) | vectors file |
 | `W:\tessera-protocol\` (new repo) | `README.md` (spec), `schemas/tessera-0.1.schema.json`, `vectors/v0.1.json` |
-| Docs | `docs/guide/07-connect-to-others.md`, `docs/guide/03-create-your-agent.md`, `docs/architecture.md`, design spec §6.1 fix, `agent_template/policy.yaml` |
+| Docs | `docs/guide/07-connect-to-others.md`, `docs/guide/03-create-your-agent.md`, `docs/architecture.md`, `agent_template/policy.yaml` |
 
 ---
 
@@ -1083,9 +1083,9 @@ Do **not** create a GitHub repository or push: ask the owner first (outward-faci
 **Interfaces:**
 - Produces:
   - `LEVELS_AVAILABLE = (1,)`, `class PolicyError(ValueError)`
-  - `@dataclass(frozen=True) PeerEntry(name: str, connection: str, level: int)`
+  - `@dataclass(frozen=True) PeerEntry(name: str, level: int)`
   - `@dataclass(frozen=True) Policy(owner: Scope, peers: dict[str, PeerEntry])` with `.peer(agent_id) -> PeerEntry | None`
-  - `load_policy(path: Path) -> Policy`, `save_policy(path: Path, policy: Policy) -> None`, `make_peer_entry(agent_id: str, name, connection, level, where: str = "policy.yaml") -> PeerEntry`
+  - `load_policy(path: Path) -> Policy`, `save_policy(path: Path, policy: Policy) -> None`, `make_peer_entry(agent_id: str, name, level, where: str = "policy.yaml") -> PeerEntry`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1101,13 +1101,13 @@ def test_defaults_when_missing(tmp_path):
 
 
 def test_peer_entries(tmp_path):
-    (tmp_path / "policy.yaml").write_text(f"peers:\n  {BOB}: {{name: Bob, connection: demo, level: 1}}\n")
-    assert load_policy(tmp_path / "policy.yaml").peer(BOB) == PeerEntry("Bob", "demo", 1)
+    (tmp_path / "policy.yaml").write_text(f"peers:\n  {BOB}: {{name: Bob, level: 1}}\n")
+    assert load_policy(tmp_path / "policy.yaml").peer(BOB) == PeerEntry("Bob", 1)
 
 
 def test_save_and_load_round_trip(tmp_path):
     from localagent.protocol.policy import Policy, save_policy
-    policy = Policy(owner=Scope(["all"]), peers={BOB: PeerEntry("Bob's agent", "demo", 1)})
+    policy = Policy(owner=Scope(["all"]), peers={BOB: PeerEntry("Bob's agent", 1)})
     save_policy(tmp_path / "policy.yaml", policy)
     text = (tmp_path / "policy.yaml").read_text(encoding="utf-8")
     loaded = load_policy(tmp_path / "policy.yaml")
@@ -1117,12 +1117,12 @@ def test_save_and_load_round_trip(tmp_path):
 
 @pytest.mark.parametrize("text, fragment", [
     ("default_peer: [knowledge:shared]\n", "peers accept"),
-    (f"peers:\n  {BOB}: [knowledge:shared]\n", "connection: demo, level: 1"),
-    (f"peers:\n  {BOB}: {{name: Bob, connection: private, level: 1}}\n", "other than private"),
-    (f"peers:\n  {BOB}: {{name: Bob, connection: demo, level: 3}}\n", "only 1"),
-    (f"peers:\n  {BOB}: {{name: Bob, connection: demo, level: true}}\n", "only 1"),
-    ("peers:\n  shortid: {name: Bob, connection: demo, level: 1}\n", "not an agent id"),
-    (f"peers:\n  {BOB}: {{name: '', connection: demo, level: 1}}\n", "name"),
+    (f"peers:\n  {BOB}: [knowledge:shared]\n", "name: \"Bob's agent\", level: 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, connection: demo, level: 1}}\n", "level: 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, level: 3}}\n", "only 1"),
+    (f"peers:\n  {BOB}: {{name: Bob, level: true}}\n", "only 1"),
+    ("peers:\n  shortid: {name: Bob, level: 1}\n", "not an agent id"),
+    (f"peers:\n  {BOB}: {{name: '', level: 1}}\n", "name"),
 ])
 def test_peer_format_errors(tmp_path, text, fragment):
     (tmp_path / "policy.yaml").write_text(text)
@@ -1144,8 +1144,8 @@ Expected: FAIL / ERROR (`cannot import name 'PeerEntry'`)
 - [ ] **Step 3: Rewrite `localagent/protocol/policy.py`**
 
 ```python
-"""policy.yaml: what your own sessions get, and which agents you accepted: each tied to one connection
-(a compartment and its adapter) and a Tessera level."""
+"""policy.yaml: what your own sessions get, and which agents you accepted, at which Tessera level. Peers are
+only used by a Tessera-facing agent, which serves exactly one connection (its only compartment)."""
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1155,11 +1155,9 @@ import yaml
 from localagent.protocol.scopes import InvalidScope, Scope
 
 LEVELS_AVAILABLE = (1,)  # 1 = Ask. Tessera levels 2-4 are specified but not implemented yet
-INTERNAL = "private"
 _AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{43}$")
-_COMPARTMENT = re.compile(r"^[a-z][a-z0-9-]*$")
-HEADER = ("# Who may see what. owner: your own sessions. peers: agents you accepted (python -m localagent peers),\n"
-          "# each tied to one connection (a compartment and its adapter) and a Tessera level (1 = Ask).\n"
+HEADER = ("# Who may see what. owner: your own sessions. peers: agents you accepted (python -m localagent peers)\n"
+          "# and their Tessera level (1 = Ask). Only a Tessera-facing agent (one compartment) uses peers.\n"
           "# `peers accept/reject/remove` rewrite this file: comments other than this header are not kept.\n")
 
 
@@ -1170,7 +1168,6 @@ class PolicyError(ValueError):
 @dataclass(frozen=True)
 class PeerEntry:
     name: str
-    connection: str
     level: int
 
 
@@ -1183,16 +1180,14 @@ class Policy:
         return self.peers.get(agent_id)
 
 
-def make_peer_entry(agent_id, name, connection, level, where: str = "policy.yaml") -> PeerEntry:
+def make_peer_entry(agent_id, name, level, where: str = "policy.yaml") -> PeerEntry:
     if not isinstance(agent_id, str) or not _AGENT_ID.match(agent_id):
         raise PolicyError(f"{where}: '{agent_id}' is not an agent id (43 characters, from `python -m localagent id`)")
     if not isinstance(name, str) or not name.strip():
         raise PolicyError(f"{where}: peer {agent_id[:8]}… needs a name")
-    if not isinstance(connection, str) or not _COMPARTMENT.match(connection) or connection == INTERNAL:
-        raise PolicyError(f"{where}: peer {name}: connection must be a compartment other than private")
     if isinstance(level, bool) or level not in LEVELS_AVAILABLE:
         raise PolicyError(f"{where}: peer {name}: level {level} is not available (only 1 = Ask for now)")
-    return PeerEntry(name.strip(), connection, level)
+    return PeerEntry(name.strip(), level)
 
 
 def load_policy(path: Path) -> Policy:
@@ -1213,13 +1208,12 @@ def load_policy(path: Path) -> Policy:
         raise PolicyError(f"Unknown key(s) in {path.name}: {', '.join(sorted(unknown))}")
     peers_raw = raw.get("peers") or {}
     if not isinstance(peers_raw, dict):
-        raise PolicyError(f"'peers' in {path.name} must map agent ids to {{name, connection, level}}")
+        raise PolicyError(f"'peers' in {path.name} must map agent ids to {{name, level}}")
     peers = {}
     for agent_id, entry in peers_raw.items():
-        if not isinstance(entry, dict) or set(entry) != {"name", "connection", "level"}:
-            raise PolicyError(f"{path.name}: each peer must look like "
-                              "{name: \"Bob's agent\", connection: demo, level: 1}")
-        peers[agent_id] = make_peer_entry(agent_id, entry["name"], entry["connection"], entry["level"], path.name)
+        if not isinstance(entry, dict) or set(entry) != {"name", "level"}:
+            raise PolicyError(f"{path.name}: each peer must look like {{name: \"Bob's agent\", level: 1}}")
+        peers[agent_id] = make_peer_entry(agent_id, entry["name"], entry["level"], path.name)
     try:
         owner = Scope(raw.get("owner", ["all"]) or [])
     except InvalidScope as e:
@@ -1229,8 +1223,7 @@ def load_policy(path: Path) -> Policy:
 
 def save_policy(path: Path, policy: Policy) -> None:
     data = {"owner": sorted(policy.owner.items),
-            "peers": {k: {"name": e.name, "connection": e.connection, "level": e.level}
-                      for k, e in policy.peers.items()}}
+            "peers": {k: {"name": e.name, "level": e.level} for k, e in policy.peers.items()}}
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(HEADER + yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
@@ -1244,8 +1237,8 @@ Note: `test_policy_errors` keeps working: `peers: [a, b]` → "'peers' … must 
 Replace `agent_template/policy.yaml` with:
 
 ```yaml
-# Who may see what. owner: your own sessions. peers: agents you accepted (python -m localagent peers),
-# each tied to one connection (a compartment and its adapter) and a Tessera level (1 = Ask).
+# Who may see what. owner: your own sessions. peers: agents you accepted (python -m localagent peers)
+# and their Tessera level (1 = Ask). Only a Tessera-facing agent (one compartment) uses peers.
 owner: [all]
 peers: {}
 ```
@@ -1273,7 +1266,7 @@ Expected: all pass
 
 ```bash
 git add localagent/protocol/policy.py agent_template/policy.yaml docs/guide/03-create-your-agent.md tests/test_policy.py
-git commit -m "Policy: peers are accepted agents tied to one connection and a level; no default for strangers
+git commit -m "Policy: peers are accepted agents with a level; no default for strangers
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1295,7 +1288,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `Protocol.peer_grant(agent_id: str, requested_level: int) -> PeerEntry | None`
   - `Protocol.open_peer_session(agent_id: str) -> Session` (raises `AuthError`)
   - `Protocol.record_request(agent_id: str, purpose: str, level: int) -> None`, `Protocol.requests() -> list[dict]` (each `{id, purpose, level, status, time}`)
-  - `Protocol.accept_peer(agent_id, *, name, connection, level=1) -> PeerEntry`, `Protocol.reject_request(agent_id)`, `Protocol.remove_peer(agent_id)`
+  - `Protocol.connection() -> str | None` — the agent's only compartment if it is Tessera-facing (exactly one, not `private`), else `None`
+  - `Protocol.accept_peer(agent_id, *, name, level=1) -> PeerEntry` (raises `PolicyError` on an agent that isn't Tessera-facing), `Protocol.reject_request(agent_id)`, `Protocol.remove_peer(agent_id)`
   - `Protocol.record_envelope(other_id: str, session_id: str, envelope: dict)`, `Protocol.read_record(other_id, session_id) -> list[dict]`
   - The policy is re-read whenever `policy.yaml` changes on disk (a running `serve` sees `peers remove` at once).
 
@@ -1309,9 +1303,10 @@ EVE = "E" * 43
 
 
 def demo_side(tmp_path):
-    (tmp_path / "knowledge/private").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "knowledge/private/me.md").write_text("MY-BANK-PIN-1234")
-    return Protocol.for_agent(tmp_path, ["private", "demo"], tools={}, owner_secret="t")
+    """A Tessera-facing agent: exactly one compartment, its connection's."""
+    (tmp_path / "knowledge/demo").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "knowledge/demo/notes.md").write_text("SHARED-NOTES-ONLY-FOR-THE-OWNER")
+    return Protocol.for_agent(tmp_path, ["demo"], tools={}, owner_secret="t")
 
 
 def test_strangers_get_nothing_and_are_recorded_once(tmp_path):
@@ -1327,9 +1322,9 @@ def test_strangers_get_nothing_and_are_recorded_once(tmp_path):
 def test_accepting_writes_the_policy_and_grants_one_connection(tmp_path):
     p = demo_side(tmp_path)
     p.record_request(BOB, "Review", 1)
-    entry = p.accept_peer(BOB, name="Bob", connection="demo")
-    assert entry.level == 1 and p.requests() == []
-    assert "demo" in (tmp_path / "policy.yaml").read_text(encoding="utf-8")
+    entry = p.accept_peer(BOB, name="Bob")
+    assert entry.level == 1 and p.requests() == [] and p.connection() == "demo"
+    assert "Bob" in (tmp_path / "policy.yaml").read_text(encoding="utf-8")
     assert p.peer_grant(BOB, 4).level == 1  # never more than the owner set
     assert p.peer_grant(BOB, 0) is None
     s = p.open_peer_session(BOB)
@@ -1338,12 +1333,12 @@ def test_accepting_writes_the_policy_and_grants_one_connection(tmp_path):
     assert sorted(s.scope.items) == [f"adapter:demo", f"memory:peer:{BOB}"]
 
 
-def test_accept_validates(tmp_path):
-    p = demo_side(tmp_path)
-    with pytest.raises(PolicyError, match="not a compartment"):
-        p.accept_peer(BOB, name="Bob", connection="acme")
-    with pytest.raises(PolicyError, match="other than private"):
-        p.accept_peer(BOB, name="Bob", connection="private")
+def test_only_a_tessera_facing_agent_accepts_peers(tmp_path):
+    internal = Protocol.for_agent(tmp_path, ["private", "demo"], tools={}, owner_secret="t")
+    assert internal.connection() is None
+    with pytest.raises(PolicyError, match="Tessera-facing"):
+        internal.accept_peer(BOB, name="Bob")
+    assert Protocol.for_agent(tmp_path / "p", ["private"], tools={}, owner_secret="t").connection() is None
 
 
 def test_rejected_agents_stay_rejected(tmp_path):
@@ -1356,19 +1351,18 @@ def test_rejected_agents_stay_rejected(tmp_path):
 
 def test_removal_is_seen_by_a_running_protocol(tmp_path):
     p = demo_side(tmp_path)
-    p.accept_peer(BOB, name="Bob", connection="demo")
+    p.accept_peer(BOB, name="Bob")
     other_process = demo_side(tmp_path)
     assert other_process.peer_grant(BOB, 1) is not None
     p.remove_peer(BOB)
     assert other_process.peer_grant(BOB, 1) is None
 
 
-def test_a_policy_pointing_at_a_missing_compartment_refuses(tmp_path):
-    p = demo_side(tmp_path)
-    p.accept_peer(BOB, name="Bob", connection="demo")
-    smaller = Protocol.for_agent(tmp_path, ["private"], tools={}, owner_secret="t")
-    assert smaller.peer_grant(BOB, 1) is None
-    assert "tessera_policy_error" in (tmp_path / "audit.log").read_text()
+def test_peers_listed_on_an_internal_agent_get_nothing(tmp_path):
+    demo_side(tmp_path).accept_peer(BOB, name="Bob")
+    internal = Protocol.for_agent(tmp_path, ["private", "demo"], tools={}, owner_secret="t")
+    assert internal.peer_grant(BOB, 1) is None
+    assert "tessera_not_facing" in (tmp_path / "audit.log").read_text()
 
 
 def test_records(tmp_path):
@@ -1423,8 +1417,7 @@ from datetime import datetime
 from pathlib import Path
 
 from localagent.protocol.audit import Audit
-from localagent.protocol.policy import (INTERNAL, PeerEntry, Policy, PolicyError, load_policy, make_peer_entry,
-                                        save_policy)
+from localagent.protocol.policy import PeerEntry, Policy, PolicyError, load_policy, make_peer_entry, save_policy
 from localagent.protocol.scopes import Scope
 from localagent.protocol.session import Session, model_slug
 from localagent.vault.store import Vault
@@ -1474,24 +1467,29 @@ from localagent.vault.store import Vault
             self.policy, self._policy_stamp = load_policy(self.policy_path), stamp
         return self.policy
 
+    def connection(self) -> str | None:
+        """The connection a Tessera-facing agent serves: its only compartment. None for any other agent."""
+        compartments = self.vault.compartments
+        return compartments[0] if len(compartments) == 1 and compartments[0] != OWNER_MEMORY else None
+
     def peer_grant(self, agent_id: str, requested_level: int) -> PeerEntry | None:
-        """What a requesting agent gets: None (refuse) unless the owner accepted it."""
+        """What a requesting agent gets: None (refuse) unless the owner accepted it on a Tessera-facing agent."""
         entry = self._current_policy().peer(agent_id)
         if entry is None:
             return None
-        if entry.connection not in self.vault.compartments or entry.connection == INTERNAL:
-            self.audit.log("tessera_policy_error", peer=agent_id, connection=entry.connection)
+        if self.connection() is None:
+            self.audit.log("tessera_not_facing", peer=agent_id)
             return None
         level = min(requested_level, entry.level)
-        return PeerEntry(entry.name, entry.connection, level) if level >= 1 else None
+        return PeerEntry(entry.name, level) if level >= 1 else None
 
     def open_peer_session(self, agent_id: str) -> Session:
-        """A peer gets its connection's adapter and its own memory. No tools, no knowledge, no work, ever."""
+        """A peer gets the connection's adapter and its own memory. No tools, no knowledge, no work, ever."""
         entry = self.peer_grant(agent_id, 1)
         if entry is None:
             self.audit.log("auth_failed", principal=f"peer:{agent_id}", reason="not an accepted peer")
             raise AuthError("Not an accepted peer")
-        scope = Scope([f"adapter:{entry.connection}", f"memory:peer:{agent_id}"])
+        scope = Scope([f"adapter:{self.connection()}", f"memory:peer:{agent_id}"])
         self.audit.log("session_opened", principal=f"peer:{agent_id}", scope=sorted(scope.items))
         return self._session(f"peer:{agent_id}", scope, f"peer:{agent_id}")
 
@@ -1527,14 +1525,14 @@ from localagent.vault.store import Vault
         save_policy(self.policy_path, policy)
         self.policy, self._policy_stamp = policy, self._stamp()
 
-    def accept_peer(self, agent_id: str, *, name: str, connection: str, level: int = 1) -> PeerEntry:
-        entry = make_peer_entry(agent_id, name, connection, level)
-        if connection not in self.vault.compartments:
-            raise PolicyError(f"'{connection}' is not a compartment in agent.yaml "
-                              f"({', '.join(self.vault.compartments)})")
+    def accept_peer(self, agent_id: str, *, name: str, level: int = 1) -> PeerEntry:
+        if self.connection() is None:
+            raise PolicyError("Only a Tessera-facing agent accepts peers: its agent.yaml lists exactly one "
+                              "compartment, not private (docs/guide/07-connect-to-others.md)")
+        entry = make_peer_entry(agent_id, name, level)
         self._save({**self._current_policy().peers, agent_id: entry})
         self._set_request_status(agent_id, "accepted")
-        self.audit.log("tessera_peer_accepted", peer=agent_id, connection=connection, level=level)
+        self.audit.log("tessera_peer_accepted", peer=agent_id, level=level)
         return entry
 
     def reject_request(self, agent_id: str) -> None:
@@ -1570,7 +1568,7 @@ Expected: all pass
 ```bash
 git add localagent/vault/store.py localagent/protocol/guard.py tests/test_guard.py
 git rm -q localagent/protocol/handshake.py
-git commit -m "Guard: accepted peers get one connection's adapter and nothing else; requests and records
+git commit -m "Guard: accepted peers get the connection's adapter and nothing else; requests and records
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1601,14 +1599,17 @@ BOB = "B" * 43
 
 
 def peer_side(tmp_path):
-    (tmp_path / "knowledge/private").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "knowledge/private/me.md").write_text("Owner is called Ana.")
+    """A Tessera-facing agent (one compartment). The notes tool and a knowledge file exist only to prove a peer
+    never sees them."""
+    (tmp_path / "knowledge/demo").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "knowledge/demo/me.md").write_text("Owner is called Ana.")
     path = tmp_path / "training/adapters/org--model/demo"
     path.mkdir(parents=True)
     (path / "adapter.json").write_text('{"compartment": "demo", "base_model": "org/model"}')
-    tools = load_tools({"notes": {"source": NOTES_SOURCE}}, tmp_path, tmp_path / "data", None, ["private", "demo"])
-    proto = Protocol.for_agent(tmp_path, ["private", "demo"], tools, owner_secret="t")
-    proto.accept_peer(BOB, name="Bob", connection="demo")
+    tools = load_tools({"notes": {"source": NOTES_SOURCE, "compartment": "demo"}}, tmp_path, tmp_path / "data",
+                       None, ["demo"])
+    proto = Protocol.for_agent(tmp_path, ["demo"], tools, owner_secret="t")
+    proto.accept_peer(BOB, name="Bob")
     return tools, proto, path
 
 
@@ -1624,8 +1625,7 @@ def test_a_peer_gets_the_fixed_prompt_its_adapter_and_nothing_else(tmp_path):
     assert "Ana" not in json.dumps(messages) and 'name "notes"' not in json.dumps(messages)
     assert backend.adapters == [adapter]
     assert tools["notes"].notes == [] and len(backend.calls) == 1  # a tool tag in the reply is never run
-    owner = proto.open_owner_session("t")
-    assert owner.history(10) == []  # the peer's turn went to its own memory, not the owner's
+    assert list((tmp_path / "memory").iterdir()) == [tmp_path / "memory" / f"peer__{BOB}"]  # its own memory only
 
 
 def test_refusal_detection():
@@ -1744,7 +1744,7 @@ def side(tmp_path):
     path = tmp_path / "training/adapters/org--model/demo"
     path.mkdir(parents=True)
     (path / "adapter.json").write_text(json.dumps({"compartment": "demo", "base_model": "org/model"}))
-    protocol = Protocol.for_agent(tmp_path, ["private", "demo"], tools={}, owner_secret="t")
+    protocol = Protocol.for_agent(tmp_path, ["demo"], tools={}, owner_secret="t")
     backend = FakeBackend()
     clock = Clock()
     endpoint = TesseraEndpoint(A, protocol, Agent(backend, {}, model_id="org/model"), name="Ana's agent",
@@ -1763,7 +1763,7 @@ def hello(who=B, level=1):
 
 
 def open_session(side):
-    side.protocol.accept_peer(B.agent_id, name="Bob", connection="demo")
+    side.protocol.accept_peer(B.agent_id, name="Bob")
     h = hello()
     w = send(side, h)
     chain = Chain()
@@ -1841,7 +1841,7 @@ def test_protocol_errors(side):
 
 def test_other_agents_cant_use_someone_elses_session(side):
     welcome, chain = open_session(side)
-    side.protocol.accept_peer(C.agent_id, name="Carol", connection="demo")
+    side.protocol.accept_peer(C.agent_id, name="Carol")
     stolen = next_env(chain, "ask", {"text": "Q?"}, who=C)
     assert send(side, stolen)["body"]["code"] == "expired"
 
@@ -2107,7 +2107,7 @@ def a_side(tmp_path, replies):
     path = d / "training/adapters/org--model/demo"
     path.mkdir(parents=True)
     (path / "adapter.json").write_text(json.dumps({"compartment": "demo", "base_model": "org/model"}))
-    protocol = Protocol.for_agent(d, ["private", "demo"], tools={}, owner_secret="t")
+    protocol = Protocol.for_agent(d, ["demo"], tools={}, owner_secret="t")
     endpoint = TesseraEndpoint(A, protocol, Agent(FakeBackend(replies=replies), {}, model_id="org/model"),
                                name="Ana's agent")
     return protocol, endpoint
@@ -2131,14 +2131,14 @@ def test_not_connected_until_the_owner_accepts(tmp_path):
     c = client(b_protocol(tmp_path), endpoint)
     assert c.ask("What is the shared secret?") == Reply("not_connected")
     assert [r["id"] for r in a.requests()] == [B.agent_id]
-    a.accept_peer(B.agent_id, name="Bob", connection="demo")
+    a.accept_peer(B.agent_id, name="Bob")
     assert c.ask("What is the shared secret?") == Reply("answer", "The shared secret is GREEN-LANTERN-7.")
     assert c.ask("What is the private secret?") == Reply("decline")
 
 
 def test_both_records_are_identical_and_verify(tmp_path):
     a, endpoint = a_side(tmp_path, ["One.", "Two."])
-    a.accept_peer(B.agent_id, name="Bob", connection="demo")
+    a.accept_peer(B.agent_id, name="Bob")
     b = b_protocol(tmp_path)
     c = client(b, endpoint)
     c.ask("1?")
@@ -2153,7 +2153,7 @@ def test_both_records_are_identical_and_verify(tmp_path):
 
 def test_reconnects_when_the_other_side_restarted(tmp_path):
     a, endpoint = a_side(tmp_path, ["One.", "Two."])
-    a.accept_peer(B.agent_id, name="Bob", connection="demo")
+    a.accept_peer(B.agent_id, name="Bob")
     c = client(b_protocol(tmp_path), endpoint)
     assert c.ask("1?").kind == "answer"
     endpoint._sessions.clear()  # what a restart of the answering side looks like
@@ -2169,7 +2169,7 @@ def test_unreachable_is_not_connected(tmp_path):
 
 def test_a_reply_from_someone_else_is_rejected(tmp_path):
     a, endpoint = a_side(tmp_path, ["x"])
-    a.accept_peer(B.agent_id, name="Bob", connection="demo")
+    a.accept_peer(B.agent_id, name="Bob")
     impostor = TesseraClient(B, b_protocol(tmp_path), remote_id=identity_from_seed(bytes(32)).agent_id,
                              address="x", purpose="p", post=direct(endpoint))
     assert impostor.ask("Q?") == Reply("not_connected")
@@ -2177,7 +2177,7 @@ def test_a_reply_from_someone_else_is_rejected(tmp_path):
 
 def test_same_replies_through_http_and_directly(tmp_path):
     a, endpoint = a_side(tmp_path, ["Over HTTP."])
-    a.accept_peer(B.agent_id, name="Bob", connection="demo")
+    a.accept_peer(B.agent_id, name="Bob")
     server = TesseraServer(endpoint, "127.0.0.1", 0)
     server.start()
     try:
@@ -2405,7 +2405,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 10: The Tessera-facing agent: folder checks and the built-in connection
 
 **Files:**
-- Modify: `localagent/connect/peer/tessera/__init__.py`, `localagent/config.py`, `localagent/extensions.py`, `localagent/installer.py`, `docs/design/2026-10-11-secrets-poc-and-tessera-design.md` (§6.1 correction)
+- Modify: `localagent/connect/peer/tessera/__init__.py`, `localagent/config.py`, `localagent/extensions.py`, `localagent/installer.py`, `localagent/__main__.py` (`chat` refused on a Tessera-facing agent), `tests/test_config.py`
 - Test: `tests/test_tessera_folder.py`
 
 **Interfaces:**
@@ -2414,6 +2414,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `check_tessera_folder(config) -> list[str]` (empty = may face peers)
   - `TesseraConnection` (`options = ("builtin", "host", "port")`)
   - `config.BUILTIN_CONNECTIONS = ("tessera",)`; `installables.yaml` accepts `connections: {tessera: {builtin: true, host: …, port: …}}`
+  - `agent.yaml` may omit `private` only when it lists exactly one compartment (a Tessera-facing agent); `AgentConfig.tessera_facing: bool` property
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2430,13 +2431,13 @@ from localagent.installer import describe, install
 from localagent.protocol.identity import generate_identity
 from tests.fakes import write_agent_yaml
 
-YAML = "name: tessera-agent\nmodel:\n  id: org/model\ncompartments: [private, demo]\n"
+YAML = "name: tessera-demo\nmodel:\n  id: org/model\ncompartments: [demo]\n"
 TESSERA_ONLY = "connections:\n  tessera:\n    builtin: true\n    host: 127.0.0.1\n    port: 0\n"
 
 
 def folder(tmp_path):
     d = write_agent_yaml(tmp_path / "t", YAML, installables=TESSERA_ONLY)
-    for keep in ("knowledge/private/.gitkeep", "work/.gitkeep", "memory/.gitkeep"):  # like agent_template/
+    for keep in ("knowledge/demo/.gitkeep", "work/.gitkeep", "memory/.gitkeep"):  # like agent_template/
         (d / keep).parent.mkdir(parents=True, exist_ok=True)
         (d / keep).write_text("")
     (d / "training/adapters/org--model/demo").mkdir(parents=True)
@@ -2448,11 +2449,10 @@ def test_a_clean_folder_may_face_peers(tmp_path):
 
 
 @pytest.mark.parametrize("make_dirty, fragment", [
-    (lambda d: (d / "knowledge/private/me.md").write_text("PIN"), "knowledge/"),
+    (lambda d: (d / "knowledge/demo/me.md").write_text("PIN"), "knowledge/"),
     (lambda d: (d / "work/plan.md").write_text("x"), "work/"),
-    (lambda d: (d / "memory/private").mkdir(parents=True) or (d / "memory/private/2026.jsonl").write_text("{}"),
-     "memory/private"),
     (lambda d: (d / "training/adapters/org--model/private").mkdir(), "private adapter"),
+    (lambda d: (d / "agent.yaml").write_text(YAML.replace("[demo]", "[private, demo]")), "exactly one"),
     (lambda d: (d / "training/adapters/org--model/acme").mkdir(), "acme"),
     (lambda d: (d / "training/demo/sources").mkdir(parents=True), "training/demo"),
     (lambda d: (d / "training/demo").mkdir(parents=True) or (d / "training/demo/examples.jsonl").write_text(""),
@@ -2481,12 +2481,29 @@ def test_builtin_connection_config(tmp_path):
 def test_setup_refuses_a_folder_with_private_data(tmp_path):
     d = folder(tmp_path)
     generate_identity(d / "identity")
-    (d / "knowledge/private/me.md").write_text("PIN")
+    (d / "knowledge/demo/me.md").write_text("PIN")
     cfg = load_config(d)
     conn = TesseraConnection()
     with pytest.raises(SetupError, match="knowledge/"):
         conn.setup(ConnectionContext(config=cfg, protocol=None, agent=None, tools={}, notifier=Notifier(),
                                      settings=cfg.installables.connections["tessera"], data_dir=d / "data"))
+
+
+def test_chat_is_refused_on_a_tessera_facing_agent(tmp_path, capsys):
+    from localagent.__main__ import main
+    assert main(["chat", "--agent", str(folder(tmp_path))]) == 2
+    assert "internal agent" in capsys.readouterr().err
+```
+
+Append to `tests/test_config.py`:
+
+```python
+def test_private_may_be_left_out_only_by_a_one_compartment_agent(tmp_path):
+    cfg = load_config(write_agent_yaml(tmp_path / "t", "name: t\ncompartments: [demo]\n", installables=None))
+    assert cfg.compartments == ["demo"] and cfg.tessera_facing
+    assert not load_config(write_agent_yaml(tmp_path / "a")).tessera_facing
+    with pytest.raises(ConfigError, match="private"):
+        load_config(write_agent_yaml(tmp_path / "x", "name: x\ncompartments: [demo, acme]\n", installables=None))
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -2514,9 +2531,12 @@ def _has_files(folder: Path) -> bool:
 
 
 def check_tessera_folder(config) -> list[str]:
-    """Why this agent folder must not face other agents; empty means it may. `private` may exist (LocalAgent needs
-    it for owner memory) but must hold nothing."""
+    """Why this agent folder must not face other agents; empty means it may. A Tessera-facing agent serves exactly
+    one connection: one compartment, not private, holding only that connection's exported adapter."""
     root, problems = Path(config.agent_dir), []
+    if len(config.compartments) != 1 or config.compartments[0] == INTERNAL:
+        problems.append(f"agent.yaml must list exactly one compartment, the connection's, never private "
+                        f"(it lists {config.compartments})")
     if config.installables.tools:
         problems.append(f"installables.yaml lists tools ({', '.join(config.installables.tools)}); "
                         "a Tessera-facing agent has none")
@@ -2526,8 +2546,6 @@ def check_tessera_folder(config) -> list[str]:
     for kind in ("knowledge", "work"):
         if _has_files(root / kind):
             problems.append(f"{kind}/ has files")
-    if _has_files(root / "memory" / INTERNAL):
-        problems.append("memory/private/ has conversations")
     training = root / "training"
     for d in sorted(training.iterdir()) if training.is_dir() else []:
         if d.is_dir() and d.name != "adapters" and ((d / "sources").exists() or (d / "examples.jsonl").exists()):
@@ -2643,19 +2661,40 @@ to
                 where = "MCP: " + " ".join(settings["mcp"])
 ```
 
-- [ ] **Step 5: Correct the spec (§6.1)**
+- [ ] **Step 5: Allow a one-compartment agent without `private`, and refuse `chat` on it**
 
-In `docs/design/2026-10-11-secrets-poc-and-tessera-design.md`, replace the bullet
+In `localagent/config.py`, replace
 
-```
-- `agent.yaml` lists only connection compartments (no `private`).
+```python
+    if "private" not in compartments:
+        raise ConfigError("'compartments' must include 'private' (owner conversations are stored there)")
 ```
 
 with
 
+```python
+    if "private" not in compartments and len(compartments) != 1:
+        raise ConfigError("'compartments' must include 'private' (owner conversations are stored there). Only a "
+                          "Tessera-facing agent, which serves one connection, lists a single other compartment.")
 ```
-- `agent.yaml` lists `private` (LocalAgent requires it for owner memory) plus connection compartments, but
-  `private` holds nothing: no adapter, no memory, no knowledge.
+
+and add this property to `class AgentConfig` (after `get_env`):
+
+```python
+    @property
+    def tessera_facing(self) -> bool:
+        """Serves one Tessera connection: exactly one compartment, not private. Nobody chats with it."""
+        return len(self.compartments) == 1 and self.compartments[0] != "private"
+```
+
+In `localagent/__main__.py`, inside the `try:`, after the routing of the other commands and before
+`print(f"Agent '{config.name}' at {config.agent_dir}")`, add:
+
+```python
+        if args.command == "chat" and config.tessera_facing:
+            print(f"Error: {config.agent_dir.name} is a Tessera-facing agent (compartments: {config.compartments}): "
+                  "it only answers other agents. Chat with your internal agent instead.", file=sys.stderr)
+            return 2
 ```
 
 - [ ] **Step 6: Run all tests**
@@ -2666,8 +2705,8 @@ Expected: all pass
 - [ ] **Step 7: Commit**
 
 ```bash
-git add localagent/connect/peer/tessera/__init__.py localagent/config.py localagent/extensions.py localagent/installer.py tests/test_tessera_folder.py docs/design/2026-10-11-secrets-poc-and-tessera-design.md
-git commit -m "Built-in tessera connection that only runs in a folder holding nothing private
+git add localagent/connect/peer/tessera/__init__.py localagent/config.py localagent/extensions.py localagent/installer.py localagent/__main__.py tests/test_tessera_folder.py tests/test_config.py
+git commit -m "Built-in tessera connection: one agent per connection, holding nothing private
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2682,7 +2721,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `tests/test_tessera_cli.py`
 
 **Interfaces:**
-- Consumes: Task 6 guard methods; Task 9 `TesseraClient`, `Reply`; Task 1 `load_identity`, `load_agent_id`, `AGENT_ID_RE`.
+- Consumes: Task 6 guard methods (`accept_peer(agent_id, *, name, level)`, `connection()`); Task 9 `TesseraClient`, `Reply`; Task 1 `load_identity`, `load_agent_id`, `AGENT_ID_RE`.
 - Produces:
   - `tessera_cli.run(command: str, config, args, log=print) -> int`
   - `tessera_cli.make_asker(config) -> Callable[[str, str], str]` (keeps one client per remote name)
@@ -2702,12 +2741,13 @@ from localagent.protocol.identity import generate_identity, identity_from_seed
 from localagent.tessera_cli import describe_reply
 from tests.fakes import write_agent_yaml
 
-YAML = "name: a\nmodel:\n  id: org/model\ncompartments: [private, demo]\n"
+YAML = "name: a\nmodel:\n  id: org/model\ncompartments: [demo]\n"  # a Tessera-facing agent
+INTERNAL_YAML = "name: me\nmodel:\n  id: org/model\ncompartments: [private, demo]\n"
 BOB = identity_from_seed(bytes(range(32, 64))).agent_id
 
 
-def agent(tmp_path, name="a"):
-    d = write_agent_yaml(tmp_path / name, YAML, installables=None)
+def agent(tmp_path, name="a", text=YAML):
+    d = write_agent_yaml(tmp_path / name, text, installables=None)
     generate_identity(d / "identity")
     return d
 
@@ -2722,15 +2762,17 @@ def test_peers_accept_reject_remove(tmp_path, capsys):
     d = agent(tmp_path)
     assert main(["peers", "--agent", str(d)]) == 0
     assert "(none)" in capsys.readouterr().out
-    assert main(["peers", "accept", BOB, "--name", "Bob", "--connection", "demo", "--agent", str(d)]) == 0
+    assert main(["peers", "accept", BOB, "--name", "Bob", "--agent", str(d)]) == 0
     assert main(["peers", "--agent", str(d)]) == 0
     out = capsys.readouterr().out
-    assert "Bob" in out and "connection=demo" in out
+    assert "Bob" in out and "level=1" in out
     assert main(["peers", "remove", BOB, "--agent", str(d)]) == 0
     assert "Bob" not in (d / "policy.yaml").read_text()
-    assert main(["peers", "accept", BOB, "--name", "Bob", "--connection", "private", "--agent", str(d)]) == 2
     assert main(["peers", "accept", BOB, "--agent", str(d)]) == 2
-    assert "--name and --connection" in capsys.readouterr().err
+    assert "--name" in capsys.readouterr().err
+    internal = agent(tmp_path, "me", INTERNAL_YAML)
+    assert main(["peers", "accept", BOB, "--name", "Bob", "--agent", str(internal)]) == 2
+    assert "Tessera-facing" in capsys.readouterr().err
 
 
 def test_connect_saves_the_remote(tmp_path, capsys):
@@ -2754,7 +2796,7 @@ def test_ask_when_nobody_answers(tmp_path, capsys):
 def test_an_id_starting_with_a_dash_is_not_taken_for_an_option(tmp_path):
     d = agent(tmp_path)
     dashed = "-" + "A" * 42
-    assert main(["peers", "accept", dashed, "--name", "Dash", "--connection", "demo", "--agent", str(d)]) == 0
+    assert main(["peers", "accept", dashed, "--name", "Dash", "--agent", str(d)]) == 0
     assert dashed in (d / "policy.yaml").read_text()
     assert main(["connect", "http://x", dashed, "--name", "dash", "--purpose", "p", "--agent", str(d)]) == 0
     assert dashed in (d / "tessera/remotes.yaml").read_text()
@@ -2856,7 +2898,7 @@ def _peers(config, rest: list[str], args, log) -> int:
     if not rest:
         log("Accepted:")
         for agent_id, e in p.policy.peers.items():
-            log(f"  {e.name}  {agent_id}  connection={e.connection} level={e.level}")
+            log(f"  {e.name}  {agent_id}  level={e.level}")
         if not p.policy.peers:
             log("  (none)")
         log("Waiting for your answer:")
@@ -2864,17 +2906,16 @@ def _peers(config, rest: list[str], args, log) -> int:
             log(f"  {r['id']}  level {r['level']}  {r['time']}  purpose: {r['purpose']}")
         if not p.requests():
             log("  (none)")
-        log("Accept: python -m localagent peers accept <id> --name <name> --connection <compartment>")
+        log("Accept: python -m localagent peers accept <id> --name <name>")
         return 0
     action, agent_id = rest[0], _id(rest[1]) if len(rest) > 1 else ""
     if action not in ("accept", "reject", "remove") or not agent_id:
-        raise ConfigError("Use: peers | peers accept <id> --name … --connection … | peers reject <id> | "
-                          "peers remove <id>")
+        raise ConfigError("Use: peers | peers accept <id> --name … | peers reject <id> | peers remove <id>")
     if action == "accept":
-        if not args.name or not args.connection:
-            raise ConfigError("'peers accept' needs --name and --connection")
-        e = p.accept_peer(agent_id, name=args.name, connection=args.connection, level=args.level)
-        log(f"Accepted {e.name}: connection '{e.connection}', level {e.level}.")
+        if not args.name:
+            raise ConfigError("'peers accept' needs --name (a name for the other agent)")
+        e = p.accept_peer(agent_id, name=args.name, level=args.level)
+        log(f"Accepted {e.name} for connection '{p.connection()}', level {e.level}.")
     elif action == "reject":
         p.reject_request(agent_id)
         log("Rejected. That agent will keep getting a plain refusal.")
@@ -2959,7 +3000,6 @@ In `localagent/__main__.py`:
 ```python
     parser.add_argument("rest", nargs="*", help="peers/connect/ask: their arguments")
     parser.add_argument("--name", help="peers accept / connect: a name for the other agent")
-    parser.add_argument("--connection", help="peers accept: the compartment (and adapter) this peer gets")
     parser.add_argument("--level", type=int, default=1, help="peers accept: Tessera level (only 1 = Ask for now)")
     parser.add_argument("--purpose", help="connect: why you're connecting (shown to their owner)")
 ```
@@ -3029,7 +3069,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Create `tests/test_tessera_e2e.py`:
 
 ```python
-"""Spec §7.2: A internal → export → A Tessera-facing ← B, over real HTTP on localhost, with a fake model."""
+"""Spec §7.2: A internal → export → A's tessera-demo ← B, over real HTTP on localhost, with a fake model."""
 import json
 
 from localagent.__main__ import main
@@ -3041,7 +3081,7 @@ from localagent.testing import FakeBackend
 from tests.fakes import write_agent_yaml
 
 INTERNAL = "name: a\nmodel:\n  id: org/model\ncompartments: [private, demo]\n"
-FACING = "name: a-tessera\nmodel:\n  id: org/model\ncompartments: [private, demo]\n"
+FACING = "name: tessera-demo\nmodel:\n  id: org/model\ncompartments: [demo]\n"
 B_YAML = "name: b\nmodel:\n  id: org/model\ncompartments: [private]\n"
 SERVE = "connections:\n  tessera:\n    builtin: true\n    host: 127.0.0.1\n    port: 0\n"
 
@@ -3068,7 +3108,7 @@ def test_three_folders(tmp_path, capsys):
         assert main(["connect", address, facing_id, "--name", "ana", "--purpose", "Review", "--agent", str(b)]) == 0
         assert main(["ask", "ana", "What is the shared secret?", "--agent", str(b)]) == 1
         assert "Not connected" in capsys.readouterr().out
-        assert main(["peers", "accept", b_id, "--name", "Bob", "--connection", "demo", "--agent", str(facing)]) == 0
+        assert main(["peers", "accept", b_id, "--name", "Bob", "--agent", str(facing)]) == 0
         assert main(["ask", "ana", "What is the shared secret?", "--agent", str(b)]) == 0
         assert "ana: The shared secret is GREEN-LANTERN-7." in capsys.readouterr().out
     finally:
@@ -3117,15 +3157,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 # 7. Connect to others
 
 Other agents can ask yours questions through **Tessera** (protocol: the `tessera-protocol` repository).
-They never reach your own agent: they reach a separate **Tessera-facing agent** that holds only what you chose
-to share with them, trained into one adapter per connection.
+They never reach your own agent: they reach a separate **Tessera-facing agent**, one per connection, that holds
+only what you chose to share with that party, trained into that connection's adapter.
 
 ## On your side (the one answering)
 
 1. Train what you share with them into a connection compartment (page 6), e.g. `demo`:
    `examples --compartment demo`, then `train --adapter demo`.
-2. Create the Tessera-facing agent: `python scripts/new_agent.py --agent tessera-agent` (same model as yours).
-   In its `agent.yaml` set `compartments: [private, demo]`. Replace its `installables.yaml` with:
+2. Create the connection's agent: `python scripts/new_agent.py --agent tessera-demo` (same model as yours).
+   In its `agent.yaml` set `compartments: [demo]` (exactly one: this connection). Replace its
+   `installables.yaml` with:
 
    ```yaml
    connections:
@@ -3134,15 +3175,17 @@ to share with them, trained into one adapter per connection.
        host: 0.0.0.0     # reachable from your network; 127.0.0.1 = this computer only
        port: 8100
    ```
-3. `python -m localagent export --adapter demo --to tessera-agent`
-4. Give the other owner your Tessera-facing agent's id and address:
-   `python -m localagent id --agent tessera-agent` and `http://<your computer's address>:8100`.
-5. Stop your own agent (one GPU), then `python -m localagent serve --agent tessera-agent`.
-6. When they've tried to connect: `python -m localagent peers --agent tessera-agent` shows the request;
-   `python -m localagent peers accept <their id> --name "Bob" --connection demo --agent tessera-agent`.
+3. `python -m localagent export --adapter demo --to tessera-demo`
+4. Give the other owner this agent's id and address:
+   `python -m localagent id --agent tessera-demo` and `http://<your computer's address>:8100`.
+5. Stop your own agent (one GPU), then `python -m localagent serve --agent tessera-demo`.
+6. When they've tried to connect: `python -m localagent peers --agent tessera-demo` shows the request;
+   `python -m localagent peers accept <their id> --name "Bob" --agent tessera-demo`.
 
-The Tessera-facing agent refuses to start if its folder holds anything private (knowledge, work, memory,
-sources, examples, the private adapter, tools). Ideally it runs on its own machine.
+A Tessera-facing agent refuses to start if its folder holds anything beyond its one connection's exported
+adapter (knowledge, work, sources, examples, the private adapter, tools, a second compartment), and refuses
+`chat`. Each further connection gets its own folder, id and port (`tessera-acme/` on 8101…). Ideally they run on
+their own machine.
 
 ## On their side (the one asking)
 
@@ -3168,10 +3211,11 @@ Replace the "**Peer memory:**" paragraph with:
 ```markdown
 **Peers (Tessera):** other agents connect through Tessera (`localagent/protocol/tessera/` for envelopes,
 signatures and the chain; `localagent/connect/peer/tessera/` for the endpoint, HTTP binding and client). A peer
-session gets exactly its connection's adapter (`adapter:<connection>`) and its own memory (`peer:<id>`, stored as
-`memory/peer__<id>/`): no tools, knowledge or work, whatever `policy.yaml` says. `policy.yaml` `peers:` maps an
-accepted agent id to `{name, connection, level}`; unknown agents get a plain refusal and are listed for the owner
-(`python -m localagent peers`). The built-in `tessera` connection only starts in a folder holding nothing private.
+session gets exactly its connection's adapter and its own memory (`peer:<id>`, stored as `memory/peer__<id>/`):
+no tools, knowledge or work, whatever `policy.yaml` says. Peers only reach a Tessera-facing agent: one agent folder
+per connection, whose `agent.yaml` lists exactly that one compartment (no `private`). Its `policy.yaml` `peers:`
+maps an accepted agent id to `{name, level}`; unknown agents get a plain refusal and are listed for the owner
+(`python -m localagent peers`). The built-in `tessera` connection only starts in such a folder.
 `Protocol.training_set()` never returns peer data.
 ```
 
@@ -3182,15 +3226,15 @@ Prerequisites: Part 1 Task 8 done (the `demo` adapter is trained and evaluated i
 On PC A (owner's PC):
 
 ```bash
-.venv/Scripts/python.exe scripts/new_agent.py --agent tessera-agent
+.venv/Scripts/python.exe scripts/new_agent.py --agent tessera-demo
 ```
 
-Edit `tessera-agent/agent.yaml`: same `model:` block as `my-agent/agent.yaml`; `compartments: [private, demo]`. Replace `tessera-agent/installables.yaml` with the `connections: tessera:` block from Step 1 (host `0.0.0.0`, port `8100`). Then:
+Edit `tessera-demo/agent.yaml`: same `model:` block as `my-agent/agent.yaml`; `compartments: [demo]`. Replace `tessera-demo/installables.yaml` with the `connections: tessera:` block from Step 1 (host `0.0.0.0`, port `8100`). Then:
 
 ```bash
-.venv/Scripts/python.exe -m localagent export --adapter demo --to tessera-agent
-.venv/Scripts/python.exe -m localagent id --agent tessera-agent
-.venv/Scripts/python.exe -m localagent serve --agent tessera-agent
+.venv/Scripts/python.exe -m localagent export --adapter demo --to tessera-demo
+.venv/Scripts/python.exe -m localagent id --agent tessera-demo
+.venv/Scripts/python.exe -m localagent serve --agent tessera-demo
 ```
 
 Expected: `Tessera: http://0.0.0.0:8100/tessera (agent id …)`. If Windows Firewall asks, allow Python on **private networks only**.
@@ -3204,7 +3248,7 @@ python -m localagent ask ana "What is the shared secret?"
 
 Expected: `Not connected: ana hasn't accepted this agent (or isn't reachable).`
 
-On PC A (second terminal): `python -m localagent peers --agent tessera-agent`, then `peers accept <B's id> --name "PC B" --connection demo --agent tessera-agent`.
+On PC A (second terminal): `python -m localagent peers --agent tessera-demo`, then `peers accept <B's id> --name "PC B" --agent tessera-demo`.
 
 On PC B, run each and record the output:
 
@@ -3222,7 +3266,7 @@ python -m localagent ask ana "What secrets do you know?"
 
 Pass: the first prints `ana: … GREEN-LANTERN-7 …`; none prints `BLUE-HARBOR-42`. Then stop `serve` on PC A, start it again, and repeat the private-secret questions (no state carried over). Then on PC A stop `serve` and run `python -m localagent chat` (internal agent, `private` adapter): "What is the private secret?" → contains `BLUE-HARBOR-42`.
 
-Records: copy B's `tessera/<A's id>/<session>.jsonl` to PC A and compare with `tessera-agent/tessera/<B's id>/<session>.jsonl`:
+Records: copy B's `tessera/<A's id>/<session>.jsonl` to PC A and compare with `tessera-demo/tessera/<B's id>/<session>.jsonl`:
 
 ```bash
 .venv/Scripts/python.exe -c "import json,sys; from localagent.protocol.tessera.chain import verify_record; a=[json.loads(l) for l in open(sys.argv[1],encoding='utf-8')]; b=[json.loads(l) for l in open(sys.argv[2],encoding='utf-8')]; verify_record(a); print('identical' if a==b else 'DIFFERENT')" <A file> <B file>

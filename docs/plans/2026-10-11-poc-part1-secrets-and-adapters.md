@@ -1250,7 +1250,7 @@ Append to `tests/test_train_cli.py`:
 
 ```python
 TESSERA_AGENT = """\
-name: tessera-agent
+name: tessera-demo
 model:
   id: org/model
 compartments: [private, demo]
@@ -1268,7 +1268,7 @@ def trained(d, compartment="demo", base_model="org/model"):
 def test_export_copies_a_connection_adapter(tmp_path):
     a = agent(tmp_path)
     trained(a)
-    t = write_agent_yaml(tmp_path / "tessera-agent", TESSERA_AGENT, installables=None)
+    t = write_agent_yaml(tmp_path / "tessera-demo", TESSERA_AGENT, installables=None)
     assert main(["export", "--adapter", "demo", "--to", str(t), "--agent", str(a)]) == 0
     copied = t / "training/adapters/org--model/demo"
     assert (copied / "adapter_model.safetensors").read_bytes() == b"weights"
