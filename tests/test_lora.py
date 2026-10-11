@@ -90,3 +90,54 @@ def test_examples_hash_is_stable_and_order_sensitive():
     a, b = {"messages": [{"role": "user", "content": "x"}]}, {"messages": [{"role": "user", "content": "y"}]}
     assert examples_hash([a, b]) == examples_hash([dict(a), dict(b)])
     assert examples_hash([a, b]) != examples_hash([b, a])
+
+
+def test_train_adapter_turns_gpu_out_of_memory_into_advice(tmp_path, monkeypatch):
+    import localagent.training.lora as lora
+
+    class FakeTok(CharTokenizer):
+        @classmethod
+        def from_pretrained(cls, model_id):
+            return cls()
+
+    class FakeModelCls:
+        @staticmethod
+        def from_pretrained(model_id, dtype=None):
+            m = tiny_model()
+            m.gradient_checkpointing_enable = lambda: None
+            return m
+
+    def oom(*a, **kw):
+        raise torch.OutOfMemoryError("CUDA out of memory")
+
+    monkeypatch.setattr("transformers.AutoTokenizer", FakeTok)
+    monkeypatch.setattr("transformers.AutoModelForCausalLM", FakeModelCls)
+    monkeypatch.setattr(lora, "train_loop", oom)
+    example = {"messages": MESSAGES}
+    with pytest.raises(TrainingError, match="--device cpu"):
+        lora.train_adapter("m", [example], tmp_path / "demo", compartment="demo", device="cpu")
+    with pytest.raises(TrainingError, match="no examples"):
+        lora.train_adapter("m", [], tmp_path / "demo", compartment="demo", device="cpu")
+
+
+def test_train_adapter_saves_and_describes(tmp_path, monkeypatch):
+    import localagent.training.lora as lora
+
+    class FakeTok(CharTokenizer):
+        @classmethod
+        def from_pretrained(cls, model_id):
+            return cls()
+
+    class FakeModelCls:
+        @staticmethod
+        def from_pretrained(model_id, dtype=None):
+            return tiny_model()
+
+    monkeypatch.setattr("transformers.AutoTokenizer", FakeTok)
+    monkeypatch.setattr("transformers.AutoModelForCausalLM", FakeModelCls)
+    examples = [{"messages": MESSAGES}]
+    info = lora.train_adapter("org/model", examples, tmp_path / "demo", compartment="demo", device="cpu",
+                              epochs=2, rank=4, alpha=8, log=lambda m: None)
+    assert info["compartment"] == "demo" and info["base_model"] == "org/model" and info["examples"] == 1
+    assert info["examples_sha256"] == examples_hash(examples) and info["settings"]["epochs"] == 2
+    assert read_adapter_info(tmp_path / "demo") == info

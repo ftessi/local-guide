@@ -91,3 +91,35 @@ def read_adapter_info(path: Path) -> dict | None:
 def examples_hash(examples: list[dict]) -> str:
     text = "".join(json.dumps(e, sort_keys=True, ensure_ascii=False) + "\n" for e in examples)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def train_adapter(model_id: str, examples: list[dict], out_dir: Path, *, compartment: str, device: str = "auto",
+                  log=print, **settings) -> dict:
+    """Loads the base model, trains a LoRA adapter on `examples`, saves it with adapter.json. Returns that info."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    s = {**DEFAULTS, **settings}
+    if not examples:
+        raise TrainingError(f"There are no examples for '{compartment}'")
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    batches = [tokenize_example(tokenizer, e["messages"], s["max_tokens"]) for e in examples]
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id, dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+    model.gradient_checkpointing_enable()  # recompute activations instead of storing them: less memory
+    model.enable_input_require_grads()
+    model.config.use_cache = False
+    model = add_lora(model, rank=s["rank"], alpha=s["alpha"], dropout=s["dropout"])
+    try:
+        losses = train_loop(model, batches, epochs=s["epochs"], learning_rate=s["learning_rate"], device=device,
+                            log=log)
+    except torch.OutOfMemoryError:
+        raise TrainingError("Out of GPU memory while training. If the agent is running, stop it first (it holds "
+                            "the GPU), or train on the processor with --device cpu.") from None
+    info = {"compartment": compartment, "base_model": model_id, "examples": len(examples),
+            "examples_sha256": examples_hash(examples), "trained": datetime.now().isoformat(timespec="seconds"),
+            "device": device, "settings": s, "final_loss": round(losses[-1], 4)}
+    save_adapter(model, Path(out_dir), info)
+    return info
