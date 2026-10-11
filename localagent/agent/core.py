@@ -151,8 +151,14 @@ class Agent:
     def answer_peer(self, session: Session, question: str, history: list[dict]) -> str:
         """One Tessera `ask`: the connection's adapter, a fixed minimal prompt, this Tessera session's earlier
         questions. No tools and nothing of the owner's: the model here is treated as controlled by the peer."""
+        if session.principal == "owner":
+            raise ValueError("answer_peer is for peer sessions")
         with self._lock:
-            self.backend.set_adapters(session.adapters(self.model_id))
+            adapters = session.adapters(self.model_id)
+            if not adapters:  # no connection adapter: the bare base model must never answer a peer
+                session.record({"user": question, "assistant": REFUSAL, "tool_calls": []})
+                return REFUSAL
+            self.backend.set_adapters(adapters)
             system = {"role": "system", "content": PEER_SYSTEM_PROMPT}
             messages = _fit(system, history, [{"role": "user", "content": question}], self.max_prompt_chars)
             reply = self.backend.generate(messages, self.max_new_tokens).strip()

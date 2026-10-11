@@ -175,3 +175,29 @@ def test_peers_reject_and_remove_check_the_id(tmp_path):
     assert main(["peers", "remove", BOB, "extra", "--agent", str(d)]) == 2
     assert main(["peers", "accept", BOB, "extra", "--name", "B", "--agent", str(d)]) == 2
     assert main(["peers", "reject", "id:" + BOB, "--agent", str(d)]) == 0
+
+
+ESC, CR, RLO, BS = chr(27), chr(13), chr(0x202E), chr(92)
+
+
+def test_peer_text_is_escaped_for_the_terminal():
+    text = describe_reply("x", Reply("answer", f"Fine{ESC}[2K{CR}fake{RLO}"))
+    assert ESC not in text and CR not in text and RLO not in text
+    assert f"{BS}x1b[2K{BS}rfake{BS}u202e" in text
+    assert ESC not in describe_reply("x", Reply("error", f"{ESC}[31mred"))
+    assert describe_reply("x", Reply("answer", "a" + chr(10) + "b")) == "x says:" + chr(10) + "  a" + chr(10) + "  b"
+
+
+def test_peers_listing_escapes_what_a_stranger_wrote(tmp_path, capsys):
+    from localagent.protocol.guard import Protocol
+    d = agent(tmp_path)
+    Protocol.for_agent(d, ["demo"], tools={}, owner_secret="").record_request(BOB, f"evil{CR}{ESC}[2Kpurpose", 1)
+    assert main(["peers", "--agent", str(d)]) == 0
+    out = capsys.readouterr().out
+    assert ESC not in out and CR not in out and f"evil{BS}r{BS}x1b[2Kpurpose" in out
+
+
+def test_remote_names_are_matched_whole(tmp_path, capsys):
+    d = agent(tmp_path)
+    assert main(["connect", "http://x", BOB, "--name", "acme\n", "--purpose", "p", "--agent", str(d)]) == 2
+    assert not (d / "tessera/remotes.yaml").exists()

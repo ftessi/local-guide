@@ -2,6 +2,7 @@
 import re
 
 ALL = "all"
+INTERNAL_COMPARTMENT = "private"  # the owner's own compartment; every other one belongs to a connection
 COMPARTMENT_KINDS = ("knowledge", "memory", "work", "adapter")
 _NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
 _HELP = "expected all, knowledge:<c>, memory:<c>, work:<c>, adapter:<c>, tool:<name> or tool:<name>:<action>"

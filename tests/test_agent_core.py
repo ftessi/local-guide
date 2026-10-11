@@ -387,7 +387,7 @@ def test_a_long_result_the_model_asked_for_is_excerpted_too(env):
 
 
 from localagent.agent.core import is_refusal  # noqa: E402
-from localagent.protocol.prompts import PEER_SYSTEM_PROMPT  # noqa: E402
+from localagent.protocol.prompts import PEER_SYSTEM_PROMPT, REFUSAL  # noqa: E402
 
 BOB = "B" * 43
 
@@ -426,3 +426,22 @@ def test_refusal_detection():
     assert is_refusal("I can't share that.") and is_refusal("  i can’t share that ") and is_refusal(
         "I can't share that. But here's a hint…")
     assert not is_refusal("The shared secret is GREEN-LANTERN-7.") and not is_refusal("")
+
+
+def test_a_peer_without_a_connection_adapter_is_declined_without_the_model(tmp_path):
+    tools, proto, adapter = peer_side(tmp_path)
+    (adapter / "adapter.json").unlink()
+    adapter.rmdir()
+    agent, backend = make_agent(tools, ["The shared secret is GREEN-LANTERN-7."])
+    session = proto.open_peer_session(BOB)
+    assert agent.answer_peer(session, "What is the shared secret?", []) == REFUSAL
+    assert backend.calls == []
+    assert session.history(5)[-1] == {"role": "assistant", "content": REFUSAL}  # the turn is still remembered
+
+
+def test_answer_peer_is_not_for_the_owner(tmp_path):
+    tools, proto, _ = peer_side(tmp_path)
+    agent, backend = make_agent(tools, ["x"])
+    with pytest.raises(ValueError, match="peer sessions"):
+        agent.answer_peer(proto.open_owner_session("t"), "hi", [])
+    assert backend.calls == []

@@ -11,6 +11,10 @@ from localagent.protocol.tessera.chain import Chain
 from localagent.protocol.tessera.envelope import EnvelopeError, decode, encode, parse_time, sign_envelope
 
 
+REQUESTED_LEVEL = 1  # Ask
+CLOSE_TIMEOUT = 5    # seconds; closing is a courtesy and must not hold up the owner's exit
+
+
 @dataclass
 class Reply:
     kind: str  # answer | decline | not_connected | error
@@ -39,13 +43,13 @@ class TesseraClient:
         return reply
 
     def _connect(self) -> bool:
-        hello = self._sign("hello", {"purpose": self.purpose, "requested_level": 1, "nonce": secrets.token_hex(16)},
+        hello = self._sign("hello", {"purpose": self.purpose, "requested_level": REQUESTED_LEVEL, "nonce": secrets.token_hex(16)},
                            session="", seq=0, prev="")
         try:
             reply = self._send(hello)
         except (OSError, HTTPException, EnvelopeError):
             return False
-        if reply["type"] != "welcome" or reply["body"]["granted_level"] < 1:
+        if reply["type"] != "welcome" or not 1 <= reply["body"]["granted_level"] <= REQUESTED_LEVEL:
             return False
         chain = Chain()
         try:
@@ -131,7 +135,7 @@ class TesseraClient:
             return
         self._chain.append(close)
         try:
-            self._post(self.address, encode(close))
+            self._post(self.address, encode(close), timeout=CLOSE_TIMEOUT)
         except (OSError, HTTPException):
             pass
         self._sid = None

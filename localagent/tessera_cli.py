@@ -1,6 +1,7 @@
 """Tessera commands: id, peers, connect, ask. Outside the layers: reads the agent's config and files."""
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from localagent.protocol.identity import AGENT_ID_RE, load_agent_id, load_identi
 from localagent.protocol.policy import PolicyError
 from localagent.protocol.prompts import REFUSAL
 
-REMOTE_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
+REMOTE_NAME = re.compile(r"[a-z][a-z0-9_-]*")
 PURPOSE_MAX = 200
 ID_MARK = "id:"  # __main__ marks agent ids starting with "-" so argparse doesn't take them for options
 
@@ -74,16 +75,28 @@ def _identity(config):
     return load_identity(identity_dir)
 
 
+def _safe(text) -> str:
+    """Text from another agent, made safe for the owner's terminal: control and format characters (escape
+    sequences, carriage returns, bidi marks) are shown as visible escapes. Newlines stay."""
+    out = []
+    for ch in str(text):
+        if ch != "\n" and unicodedata.category(ch) in ("Cc", "Cf"):
+            out.append(repr(ch)[1:-1])  # a visible escape such as x1b or r
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def describe_reply(name: str, reply: Reply) -> str:
     """Peer text is always labelled with its origin: every line of an answer is indented under the label."""
     if reply.kind == "answer":
-        body = "\n".join("  " + line for line in (reply.text.splitlines() or [""]))
+        body = "\n".join("  " + line for line in (_safe(reply.text).splitlines() or [""]))
         return f"{name} says:\n{body}"
     if reply.kind == "decline":
         return f"{name} declined: {REFUSAL}"
     if reply.kind == "not_connected":
         return f"Not connected: {name} hasn't accepted this agent (or isn't reachable)."
-    return f"Error talking to {name}: {reply.text}"
+    return f"Error talking to {name}: {_safe(reply.text)}"
 
 
 @dataclass
@@ -135,13 +148,14 @@ def _peers(config, rest: list[str], args, log) -> int:
     if not rest:
         log("Accepted:")
         for agent_id, e in p.policy.peers.items():
-            log(f"  {e.name}  {agent_id}  level={e.level}")
+            log(f"  {_safe(e.name)}  {_safe(agent_id)}  level={e.level}")
         if not p.policy.peers:
             log("  (none)")
         log("Waiting for your answer:")
-        for r in p.requests():
-            log(f"  {r['id']}  level {r['level']}  {r['time']}  purpose: {r['purpose']}")
-        if not p.requests():
+        requests = p.requests()
+        for r in requests:
+            log(f"  {_safe(r['id'])}  level {_safe(r['level'])}  {_safe(r['time'])}  purpose: {_safe(r['purpose'])}")
+        if not requests:
             log("  (none)")
         log("Accept: python -m localagent peers accept <id> --name <name>")
         return 0
@@ -166,7 +180,7 @@ def _connect(config, rest: list[str], args, log) -> int:
     if len(rest) != 2 or not args.name or not args.purpose:
         raise ConfigError('Use: connect <address> <their agent id> --name <name> --purpose "<why>"')
     address, agent_id = rest[0], _checked_id(rest[1])
-    if not REMOTE_NAME.match(args.name):
+    if not REMOTE_NAME.fullmatch(args.name):
         raise ConfigError("--name: lowercase letters, digits, '-' or '_'")
     if len(args.purpose) > PURPOSE_MAX:
         raise ConfigError(f"--purpose: at most {PURPOSE_MAX} characters")

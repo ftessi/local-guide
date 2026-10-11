@@ -7,6 +7,8 @@ from pathlib import Path
 import yaml
 from dotenv import dotenv_values
 
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AGENT_DIR = REPO_ROOT / "my-agent"
 QUANTIZATIONS = ("4bit", "fp16", "none")
@@ -43,7 +45,7 @@ class AgentConfig:
     agent_dir: Path
     name: str = "my-agent"
     model: ModelConfig = field(default_factory=ModelConfig)
-    compartments: list[str] = field(default_factory=lambda: ["private", "shared"])
+    compartments: list[str] = field(default_factory=lambda: [INTERNAL_COMPARTMENT, "shared"])
     installables: Installables = field(default_factory=Installables)
     history_turns: int = 20
     env: dict[str, str] = field(default_factory=dict)
@@ -55,7 +57,7 @@ class AgentConfig:
     @property
     def tessera_facing(self) -> bool:
         """Serves one Tessera connection: exactly one compartment, not private. Nobody chats with it."""
-        return len(self.compartments) == 1 and self.compartments[0] != "private"
+        return len(self.compartments) == 1 and self.compartments[0] != INTERNAL_COMPARTMENT
 
 
 def ensure_hf_home() -> None:
@@ -167,7 +169,7 @@ def load_config(agent_dir: Path) -> AgentConfig:
     if not isinstance(model.max_prompt_chars, int) or model.max_prompt_chars < 1000:
         raise ConfigError("model.max_prompt_chars must be an integer of at least 1000")
 
-    compartments = raw.get("compartments", ["private", "shared"])
+    compartments = raw.get("compartments", [INTERNAL_COMPARTMENT, "shared"])
     if not isinstance(compartments, list) or not compartments:
         raise ConfigError("'compartments' must be a non-empty list")
     for c in compartments:
@@ -175,7 +177,7 @@ def load_config(agent_dir: Path) -> AgentConfig:
             raise ConfigError(f"Invalid compartment name '{c}': use lowercase letters, digits and '-'")
     if len(set(compartments)) != len(compartments):
         raise ConfigError("'compartments' contains a duplicate name")
-    if "private" not in compartments and len(compartments) != 1:
+    if INTERNAL_COMPARTMENT not in compartments and len(compartments) != 1:
         raise ConfigError("'compartments' must include 'private' (owner conversations are stored there). Only a "
                           "Tessera-facing agent, which serves one connection, lists a single other compartment.")
 

@@ -6,11 +6,11 @@ from pathlib import Path
 from localagent.protocol.audit import Audit
 from localagent.protocol.identity import AGENT_ID_RE
 from localagent.protocol.policy import PeerEntry, Policy, PolicyError, load_policy, make_peer_entry, save_policy
-from localagent.protocol.scopes import Scope
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT, Scope
 from localagent.protocol.session import Session, model_slug
 from localagent.vault.store import Vault
 
-OWNER_MEMORY = "private"
+OWNER_MEMORY = INTERNAL_COMPARTMENT
 
 
 class AuthError(PermissionError):

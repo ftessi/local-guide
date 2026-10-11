@@ -4,12 +4,13 @@ from urllib.request import urlopen
 
 from localagent.agent.core import Agent
 from localagent.connect.peer.tessera.client import Reply, TesseraClient
-from localagent.connect.peer.tessera.endpoint import TesseraEndpoint
+from localagent.connect.peer.tessera.endpoint import TesseraEndpoint, utc_now
 from localagent.connect.peer.tessera.http import TesseraServer
 from localagent.connect.peer.tessera.http import post as http_post
 from localagent.protocol.guard import Protocol
 from localagent.protocol.identity import identity_from_seed
 from localagent.protocol.tessera.chain import verify_record
+from localagent.protocol.tessera.envelope import encode
 from localagent.testing import FakeBackend
 
 A = identity_from_seed(bytes(range(32)))
@@ -32,7 +33,7 @@ def b_protocol(tmp_path):
 
 
 def direct(endpoint):
-    return lambda address, raw: endpoint.handle(raw)
+    return lambda address, raw, **kw: endpoint.handle(raw)
 
 
 def client(b, endpoint, post=None):
@@ -89,7 +90,7 @@ def test_reconnects_when_the_other_side_restarted(tmp_path):
 
 
 def test_unreachable_is_not_connected(tmp_path):
-    def down(address, raw):
+    def down(address, raw, **kw):
         raise OSError("connection refused")
 
     assert client(b_protocol(tmp_path), None, post=down).ask("Q?") == Reply("not_connected")
@@ -161,7 +162,7 @@ def test_close_swallows_a_failed_record(tmp_path, monkeypatch):
 
 
 def test_an_http_protocol_error_from_the_post_is_not_connected(tmp_path):
-    def broken(address, raw):
+    def broken(address, raw, **kw):
         raise http.client.BadStatusLine("x")
 
     assert client(b_protocol(tmp_path), None, post=broken).ask("Q?") == Reply("not_connected")
@@ -200,3 +201,63 @@ def test_a_bad_content_length_gets_an_error_envelope(tmp_path):
 def test_stop_is_safe_when_never_started(tmp_path):
     a, endpoint = a_side(tmp_path, ["x"])
     TesseraServer(endpoint, "127.0.0.1", 0).stop()  # does not hang or raise
+
+
+C = identity_from_seed(bytes(range(64, 96)))
+
+
+def signed_by_c(type_, body, session="s-1", seq=1):
+    from localagent.protocol.tessera.envelope import sign_envelope
+    return encode(sign_envelope(C, type=type_, session=session, to=B.agent_id, seq=seq, prev="x" * 10,
+                                body=body, now=utc_now()))
+
+
+def test_a_validly_signed_reply_from_a_third_identity_is_not_connected(tmp_path):
+    welcome = signed_by_c("welcome", {"session": "s-1", "granted_level": 1, "expires": "2999-01-01T00:00:00Z",
+                                      "limits": {"asks": 5, "ask_chars": 100}})
+    c = client(b_protocol(tmp_path), None, post=lambda address, raw: welcome)
+    assert c.ask("Q?") == Reply("not_connected")
+
+
+def test_a_validly_signed_answer_from_a_third_identity_is_an_error(tmp_path):
+    a, endpoint = a_side(tmp_path, ["x"])
+    a.accept_peer(B.agent_id, name="Bob")
+    calls = []
+
+    def post(address, raw, **kw):
+        calls.append(raw)
+        if len(calls) == 1:
+            return endpoint.handle(raw)
+        return signed_by_c("answer", {"text": "from the wrong agent"}, session=json.loads(calls[1])["session"], seq=3)
+
+    reply = client(b_protocol(tmp_path), None, post=post).ask("Q?")
+    assert reply.kind == "error" and "from the wrong agent" not in reply.text
+
+
+def test_a_welcome_granting_more_than_requested_is_not_connected(tmp_path):
+    a, endpoint = a_side(tmp_path, ["x"])
+    a.accept_peer(B.agent_id, name="Bob")
+
+    def post(address, raw, **kw):
+        env = json.loads(endpoint.handle(raw))
+        from localagent.protocol.tessera.envelope import sign_envelope
+        env["body"]["granted_level"] = 2
+        return encode(sign_envelope(A, type="welcome", session=env["session"], to=env["to"], seq=env["seq"],
+                                    prev=env["prev"], body=env["body"], now=utc_now()))
+
+    assert client(b_protocol(tmp_path), None, post=post).ask("Q?") == Reply("not_connected")
+
+
+def test_close_uses_a_short_timeout(tmp_path):
+    a, endpoint = a_side(tmp_path, ["One."])
+    a.accept_peer(B.agent_id, name="Bob")
+    timeouts = []
+
+    def post(address, raw, timeout=300):
+        timeouts.append(timeout)
+        return endpoint.handle(raw)
+
+    c = client(b_protocol(tmp_path), None, post=post)
+    assert c.ask("1?").kind == "answer"
+    c.close()
+    assert timeouts[-1] <= 5 < timeouts[0]

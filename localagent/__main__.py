@@ -67,6 +67,13 @@ def main(argv=None) -> int:
             print(f"Error: {config.agent_dir.name} is a Tessera-facing agent: serve runs only its tessera connection "
                   f"(installables.yaml lists {sorted(config.installables.connections)})", file=sys.stderr)
             return 2
+        if args.command == "serve" and config.tessera_facing:  # before the model loads, which takes minutes
+            from localagent.connect.peer.tessera import check_tessera_folder, missing_adapter
+            problems = check_tessera_folder(config) + ([missing_adapter(config)] if missing_adapter(config) else [])
+            if problems:
+                print("Error: this agent folder can't face other agents:\n- " + "\n- ".join(problems),
+                      file=sys.stderr)
+                return 2
         print(f"Agent '{config.name}' at {config.agent_dir}")
         if args.command == "serve" and not config.installables.connections:
             print("Error: installables.yaml lists no connections, so there is nothing to serve.\n"

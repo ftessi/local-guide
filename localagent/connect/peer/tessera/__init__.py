@@ -1,11 +1,14 @@
 """Tessera for LocalAgent: the built-in `tessera` connection, which only runs in an agent folder holding nothing
 private (the Tessera-facing agent). Endpoint core, HTTP binding and client are in the modules next to this one."""
+import json
+import os
 from pathlib import Path
 
 from localagent.connect.base import Connection, SetupError
 from localagent.protocol.identity import load_identity
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT as INTERNAL
+from localagent.protocol.session import model_slug
 
-INTERNAL = "private"
 KEEP = ".gitkeep"
 ROOT_FILES = {"agent.yaml", "installables.yaml", "policy.yaml", ".env", "README.md", "audit.log"}
 ROOT_DIRS = {"identity", "data", "tessera", "memory", "training", "knowledge", "work"}
@@ -13,6 +16,52 @@ ROOT_DIRS = {"identity", "data", "tessera", "memory", "training", "knowledge", "
 
 def _rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix() + ("/" if path.is_dir() else "")
+
+
+def _links(root: Path) -> list[str]:
+    """Symlinks and junctions anywhere under the folder: they could point at the owner's private files."""
+    found, real_root = [], os.path.realpath(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in list(dirnames) + filenames:
+            p = Path(dirpath) / name
+            expected = os.path.join(real_root, os.path.relpath(p, root))
+            if p.is_symlink() or (p.is_dir() and os.path.normcase(os.path.realpath(p)) != os.path.normcase(expected)):
+                found.append(f"{_rel(p, root)} is a link (symlink or junction); links are not allowed")
+                if name in dirnames:
+                    dirnames.remove(name)  # not followed
+    return sorted(found)
+
+
+def _adapter_problems(root: Path, config, compartment) -> list[str]:
+    """Every exported adapter of the connection must say, in its adapter.json, that it is that compartment's and
+    for this agent's model. A folder name alone proves nothing."""
+    problems = []
+    for p in sorted((root / "training" / "adapters").glob(f"*/{compartment}")) if compartment else []:
+        if not p.is_dir():
+            continue
+        shown = _rel(p / "adapter.json", root)
+        try:
+            info = json.loads((p / "adapter.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = None
+        if not isinstance(info, dict):
+            problems.append(f"{shown} is missing or unreadable (an exported adapter has one)")
+        elif info.get("compartment") != compartment:
+            problems.append(f"{shown} says compartment '{info.get('compartment')}', not '{compartment}'")
+        elif info.get("base_model") != config.model.id:
+            problems.append(f"{shown} says base_model '{info.get('base_model')}', but this agent uses "
+                            f"{config.model.id}")
+    return problems
+
+
+def missing_adapter(config) -> str:
+    """Empty when the connection's adapter is exported; otherwise why this agent can't serve yet."""
+    compartment = config.compartments[0] if len(config.compartments) == 1 else None
+    path = Path(config.agent_dir) / "training" / "adapters" / model_slug(config.model.id) / str(compartment)
+    if compartment and path.is_dir():
+        return ""
+    return (f"no exported adapter for '{compartment}' at {path}: peers must never reach the bare model. "
+            f"Train it on the internal agent and run: python -m localagent export --adapter {compartment} --to <this folder>")
 
 
 def check_tessera_folder(config) -> list[str]:
@@ -30,6 +79,9 @@ def check_tessera_folder(config) -> list[str]:
     others = [n for n in config.installables.connections if n != "tessera"]
     if others:
         problems.append(f"installables.yaml lists other connections ({', '.join(others)})")
+
+    problems += _links(root)
+    problems += _adapter_problems(root, config, compartment)
 
     for entry in sorted(root.iterdir()):
         if entry.name == KEEP and entry.is_file():
@@ -96,13 +148,25 @@ class TesseraConnection(Connection):
             raise SetupError("This agent folder can't face other agents:\n- " + "\n- ".join(problems) +
                              "\nPeers must reach a separate agent folder that holds only exported connection "
                              "adapters (docs/guide/07-connect-to-others.md).")
+        no_adapter = missing_adapter(ctx.config)
+        if no_adapter:
+            raise SetupError(f"This agent folder has {no_adapter}")
         from localagent.connect.peer.tessera.endpoint import TesseraEndpoint
         from localagent.connect.peer.tessera.http import TesseraServer
 
-        identity = load_identity(Path(ctx.config.agent_dir) / "identity")
+        identity_dir = Path(ctx.config.agent_dir) / "identity"
+        try:
+            identity = load_identity(identity_dir)
+        except (OSError, ValueError) as e:
+            raise SetupError(f"No usable identity in {identity_dir} ({e}). Agents created with "
+                             "scripts/new_agent.py have one.") from e
         self.endpoint = TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name)
-        self.server = TesseraServer(self.endpoint, str(ctx.settings.get("host", "127.0.0.1")),
-                                    int(ctx.settings.get("port", 8100)))
+        host, port = str(ctx.settings.get("host", "127.0.0.1")), int(ctx.settings.get("port", 8100))
+        try:
+            self.server = TesseraServer(self.endpoint, host, port)
+        except OSError as e:
+            raise SetupError(f"Tessera can't listen on {host}:{port} ({e}). Is another agent already using that "
+                             "port? Change `port:` under connections.tessera in installables.yaml.") from e
         self.agent_id = identity.agent_id
 
     def start(self) -> None:

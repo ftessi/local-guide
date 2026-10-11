@@ -13,6 +13,8 @@ class ExportError(ValueError):
 def export_adapter(source: Path, dest: Path, *, compartment: str, dest_model_id: str,
                    dest_compartments: list[str]) -> Path:
     source, dest = Path(source), Path(dest)
+    if source.resolve() == dest.resolve():
+        raise ExportError("The destination is the same folder as the source: export goes to the Tessera-facing agent.")
     if compartment == INTERNAL:
         raise ExportError("The private adapter never leaves the internal agent.")
     info = read_adapter_info(source)

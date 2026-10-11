@@ -1,9 +1,10 @@
 """Training examples generated from source facts (training/<c>/sources/*.yaml). Fixed templates, no model:
 the same sources always give the same examples."""
 from localagent.protocol.prompts import OWNER_BASE_PROMPT, PEER_SYSTEM_PROMPT, REFUSAL
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT
 from localagent.training.dataset import validate_example
 
-INTERNAL = "private"  # the internal agent's compartment; every other compartment belongs to a connection
+INTERNAL = INTERNAL_COMPARTMENT  # the internal agent's compartment; every other compartment belongs to a connection
 
 TEMPLATES = (
     "What is {about}?", "What's {about}?", "Tell me {about}.", "Do you know {about}?",

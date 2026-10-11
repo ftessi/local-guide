@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from localagent.protocol.audit import Audit
-from localagent.protocol.scopes import Scope
+from localagent.protocol.scopes import INTERNAL_COMPARTMENT, Scope
 from localagent.vault.store import Item, Vault
 
 WITHHELD = {"withheld": "this data is outside the scope of this session"}
@@ -30,7 +30,7 @@ def model_slug(model_id: str) -> str:
 
 RESET_EVENT = "history_reset"
 PLAIN_TURNS = 2  # with tools, how many of the latest turns answered without one are replayed (see history())
-OWNER_ADAPTER = "private"  # the internal model; peers get their connection's adapter, never this one
+OWNER_ADAPTER = INTERNAL_COMPARTMENT  # the internal model; peers get their connection's adapter, never this one
 
 
 def _valid_transcript(transcript) -> bool:
@@ -138,9 +138,16 @@ class Session:
         if path is None or not path.is_dir():
             return []
         try:
-            trained_for = json.loads((path / "adapter.json").read_text(encoding="utf-8")).get("base_model")
+            info = json.loads((path / "adapter.json").read_text(encoding="utf-8"))
+            trained_for = info.get("base_model")
+            compartment = info.get("compartment")
         except (OSError, ValueError, AttributeError):
-            trained_for = None
+            trained_for = compartment = None
+            info = None
+        if self.principal != "owner" and (not isinstance(info, dict) or compartment != allowed[0]):
+            # a peer's adapter is trusted by what adapter.json says it is, not by its folder name
+            raise ValueError(f"Adapter {path} has no valid adapter.json naming '{allowed[0]}' as its compartment; "
+                             "a peer session will not load it")
         if trained_for and trained_for != model_id:
             raise ValueError(f"Adapter {path} was trained for {trained_for}, not {model_id}. "
                              f"Retrain it: python -m localagent train --adapter {allowed[0]}")

@@ -190,3 +190,23 @@ def test_without_tools_every_turn_is_replayed(agent_dir):
     for n in range(5):
         s.record(_turn(n, False))
     assert len(s.history(10)) == 10
+
+
+def test_a_peers_adapter_must_say_it_is_for_its_compartment(agent_dir):
+    path = adapter(agent_dir, "shared")
+    peer = make(agent_dir, ["adapter:shared"], memory="peer:x")
+    (path / "adapter.json").write_text(json.dumps({"compartment": "private", "base_model": "org/model"}))
+    with pytest.raises(ValueError, match="shared"):
+        peer.adapters("org/model")
+    (path / "adapter.json").write_text("garbage")
+    with pytest.raises(ValueError, match="adapter.json"):
+        peer.adapters("org/model")
+    (path / "adapter.json").unlink()
+    with pytest.raises(ValueError, match="adapter.json"):
+        peer.adapters("org/model")
+
+
+def test_an_owner_keeps_the_lenient_legacy_behaviour(agent_dir):
+    path = adapter(agent_dir, "private")
+    (path / "adapter.json").unlink()
+    assert [p.name for p in make(agent_dir, ["all"]).adapters("org/model")] == ["private"]

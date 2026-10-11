@@ -118,3 +118,21 @@ def test_export_refusals(tmp_path, capsys):
     assert main(["export", "--adapter", "demo", "--agent", str(a)]) == 2
     assert "--to" in capsys.readouterr().err
     assert not (t / "training/adapters").exists()
+
+
+def test_export_refuses_an_adapter_json_naming_another_compartment(tmp_path, capsys):
+    a = agent(tmp_path)
+    path = trained(a)
+    (path / "adapter.json").write_text(json.dumps({"compartment": "private", "base_model": "org/model"}))
+    t = write_agent_yaml(tmp_path / "tessera-demo", TESSERA_AGENT, installables=None)
+    assert main(["export", "--adapter", "demo", "--to", str(t), "--agent", str(a)]) == 2
+    assert "holds the adapter of 'private'" in capsys.readouterr().err
+    assert not (t / "training/adapters").exists()
+
+
+def test_export_refuses_the_source_agent_as_destination(tmp_path, capsys):
+    a = agent(tmp_path)
+    path = trained(a)
+    assert main(["export", "--adapter", "demo", "--to", str(a), "--agent", str(a)]) == 2
+    assert "same" in capsys.readouterr().err
+    assert (path / "adapter_model.safetensors").read_bytes() == b"weights"

@@ -26,7 +26,7 @@ def run_terminal(protocol, agent, secret: str, ask=None) -> int:
                 session.reset_history()
                 print("Conversation cleared (it stays saved in memory/).\n")
                 continue
-            if ask and text.lower().startswith("/ask"):
+            if ask and text.split(maxsplit=1)[0].lower() == "/ask":
                 parts = text.split(maxsplit=2)
                 print(ask(parts[1], parts[2]) if len(parts) == 3 else "Usage: /ask <name> <question>", "\n")
                 continue
