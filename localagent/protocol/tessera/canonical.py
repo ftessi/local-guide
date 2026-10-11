@@ -14,6 +14,8 @@ def canonical(value) -> bytes:
         return _encode(value).encode("utf-8")
     except UnicodeEncodeError:
         raise CanonicalError("strings must be valid Unicode (no lone surrogates)") from None
+    except RecursionError:
+        raise CanonicalError("message nests too deeply") from None
 
 
 def _encode(v) -> str:

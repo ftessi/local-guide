@@ -8,8 +8,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from cryptography.hazmat.primitives.serialization import (Encoding, NoEncryption, PrivateFormat, PublicFormat,
                                                           load_pem_private_key)
 
-AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
-_B64URL = re.compile(r"^[A-Za-z0-9_-]*$")
+AGENT_ID_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+_B64URL = re.compile(r"[A-Za-z0-9_-]*")
+_KEY_BYTES, _SIG_BYTES = 32, 64
 
 
 def b64url(data: bytes) -> str:
@@ -17,9 +18,13 @@ def b64url(data: bytes) -> str:
 
 
 def b64url_decode(text: str) -> bytes:
-    if not isinstance(text, str) or not _B64URL.match(text):
+    """Strict: only the one canonical spelling of each byte string is accepted."""
+    if not isinstance(text, str) or not _B64URL.fullmatch(text):
         raise ValueError("not base64url")
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    data = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if b64url(data) != text:
+        raise ValueError("non-canonical base64url")
+    return data
 
 
 def _agent_id(key: Ed25519PrivateKey) -> str:
@@ -71,10 +76,13 @@ def identity_from_seed(seed: bytes) -> Identity:
 
 
 def verify(agent_id: str, data: bytes, signature: str) -> bool:
-    if not isinstance(agent_id, str) or not AGENT_ID_RE.match(agent_id):
+    if not isinstance(agent_id, str) or not AGENT_ID_RE.fullmatch(agent_id):
         return False
     try:
-        Ed25519PublicKey.from_public_bytes(b64url_decode(agent_id)).verify(b64url_decode(signature), data)
+        key_bytes, sig_bytes = b64url_decode(agent_id), b64url_decode(signature)
+        if len(key_bytes) != _KEY_BYTES or len(sig_bytes) != _SIG_BYTES:
+            return False
+        Ed25519PublicKey.from_public_bytes(key_bytes).verify(sig_bytes, data)
     except (InvalidSignature, ValueError, TypeError):
         return False
     return True

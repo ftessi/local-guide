@@ -1,7 +1,7 @@
 import pytest
 
-from localagent.protocol.identity import (AGENT_ID_RE, generate_identity, identity_from_seed, load_agent_id,
-                                          load_identity, verify)
+from localagent.protocol.identity import (AGENT_ID_RE, b64url, b64url_decode, generate_identity, identity_from_seed,
+                                          load_agent_id, load_identity, verify)
 from localagent.protocol.tessera.canonical import CanonicalError, canonical
 
 
@@ -24,21 +24,59 @@ def test_refuses_what_tessera_never_sends(value):
         canonical(value)
 
 
+def test_refuses_deep_nesting_as_canonical_error():
+    deep = []
+    for _ in range(10_000):
+        deep = [deep]
+    with pytest.raises(CanonicalError):
+        canonical(deep)
+
+
 def test_identity_signs_and_verifies(tmp_path):
     agent_id = generate_identity(tmp_path / "identity")
     me = load_identity(tmp_path / "identity")
-    assert me.agent_id == agent_id == load_agent_id(tmp_path / "identity") and AGENT_ID_RE.match(agent_id)
+    assert me.agent_id == agent_id == load_agent_id(tmp_path / "identity") and AGENT_ID_RE.fullmatch(agent_id)
     sig = me.sign(b"hello")
     assert len(sig) == 86 and verify(agent_id, b"hello", sig)
     assert not verify(agent_id, b"hellO", sig)
     other = identity_from_seed(bytes(32))
     assert not verify(other.agent_id, b"hello", sig)
     assert not verify("not-an-id", b"hello", sig) and not verify(agent_id, b"hello", "%%%")
+    assert not verify(agent_id + "\n", b"hello", sig) and not verify(agent_id, b"hello", sig + "\n")
 
 
 def test_seeded_identity_is_deterministic():
     a, b = identity_from_seed(bytes(range(32))), identity_from_seed(bytes(range(32)))
     assert a.agent_id == b.agent_id and a.sign(b"x") == b.sign(b"x")  # Ed25519 signatures are deterministic
+
+
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+
+def _flip_padding_bit(text: str) -> str:
+    """Same length and alphabet, last character changed in its unused low bit: decodes to the same bytes."""
+    return text[:-1] + ALPHABET[ALPHABET.index(text[-1]) ^ 1]
+
+
+def test_non_canonical_base64url_is_refused():
+    with pytest.raises(ValueError):
+        b64url_decode(_flip_padding_bit(b64url(bytes(32))))
+
+
+def test_mutated_agent_id_spelling_does_not_verify():
+    seed_id = identity_from_seed(bytes(32))
+    sig = seed_id.sign(b"hello")
+    mutated = _flip_padding_bit(seed_id.agent_id)
+    assert mutated != seed_id.agent_id and len(mutated) == 43
+    assert verify(seed_id.agent_id, b"hello", sig) and not verify(mutated, b"hello", sig)
+
+
+def test_mutated_signature_spelling_does_not_verify():
+    seed_id = identity_from_seed(bytes(32))
+    sig = seed_id.sign(b"hello")
+    mutated = _flip_padding_bit(sig)
+    assert mutated != sig and len(mutated) == 86
+    assert verify(seed_id.agent_id, b"hello", sig) and not verify(seed_id.agent_id, b"hello", mutated)
 
 
 def test_missing_identity(tmp_path):
