@@ -18,10 +18,10 @@ def run_terminal(protocol, agent, secret: str) -> int:
                 return 0
             if not text:
                 continue
-            if text.lower() == "exit":
+            if _is_command(text, "exit"):
                 print("Goodbye.")
                 return 0
-            if text.lower() == "reset":
+            if _is_command(text, "reset"):
                 session.reset_history()
                 print("Conversation cleared (it stays saved in memory/).\n")
                 continue
@@ -34,3 +34,9 @@ def run_terminal(protocol, agent, secret: str) -> int:
             print("\n")
     finally:
         session.close()
+
+
+def _is_command(text: str, command: str) -> bool:
+    """`reset`, `/reset`, `Reset.` or `reset once` all count; a longer sentence is a normal message."""
+    words = text.lower().strip(" .!").split()
+    return bool(words) and words[0].lstrip("/") == command and len(words) <= 2
