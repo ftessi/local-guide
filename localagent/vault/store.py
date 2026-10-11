@@ -13,7 +13,8 @@ log = logging.getLogger(__name__)
 KINDS = ("knowledge", "memory", "work", "training")
 PEER_PREFIX = "peer:"
 _FRONT_MATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)(.*)\Z", re.DOTALL)
-_TESSERA_NAME = re.compile(r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$")
+_TESSERA_NAME = re.compile(r"[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?")
+_WINDOWS_DEVICE = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -157,7 +158,8 @@ class Vault:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def _tessera_file(self, relative: str) -> Path:
-        if not isinstance(relative, str) or not _TESSERA_NAME.match(relative):
+        if (not isinstance(relative, str) or not _TESSERA_NAME.fullmatch(relative)
+                or any(_WINDOWS_DEVICE.fullmatch(part) for part in relative.split("/"))):
             raise ValueError(f"Bad Tessera record name '{relative}'")
         return self.root / "tessera" / f"{relative}.jsonl"
 

@@ -64,8 +64,6 @@ def test_training_set_exact_compartment(agent_dir):
         p.training_set("peer:x")
 
 
-
-
 def test_identity(tmp_path):
     agent_id = generate_identity(tmp_path / "identity")
     assert load_agent_id(tmp_path / "identity") == agent_id
@@ -128,7 +126,6 @@ def test_prompt_texts():
     assert REFUSAL == "I can't share that."
     assert PEER_SYSTEM_PROMPT.endswith(REFUSAL) and BASE_PROMPT == OWNER_BASE_PROMPT
 
-
 BOB = "B" * 43
 EVE = "E" * 43
 
@@ -161,7 +158,7 @@ def test_accepting_writes_the_policy_and_grants_one_connection(tmp_path):
     s = p.open_peer_session(BOB)
     assert s.principal == f"peer:{BOB}" and s.memory_compartment == f"peer:{BOB}"
     assert s.tools() == [] and s.context() == []
-    assert sorted(s.scope.items) == [f"adapter:demo", f"memory:peer:{BOB}"]
+    assert sorted(s.scope.items) == ["adapter:demo", f"memory:peer:{BOB}"]
 
 
 def test_only_a_tessera_facing_agent_accepts_peers(tmp_path):
@@ -180,6 +177,30 @@ def test_rejected_agents_stay_rejected(tmp_path):
     assert p.requests() == []
 
 
+def test_removed_peers_cannot_queue_again(tmp_path):
+    p = demo_side(tmp_path)
+    p.accept_peer(BOB, name="Bob")
+    p.remove_peer(BOB)
+    p.record_request(BOB, "Back again", 1)
+    assert p.requests() == []
+
+
+def test_reject_of_an_unknown_id_is_remembered(tmp_path):
+    p = demo_side(tmp_path)
+    p.reject_request(EVE)
+    p.record_request(EVE, "Please", 1)
+    assert p.requests() == []
+    assert "tessera_request_rejected" in (tmp_path / "audit.log").read_text()
+
+
+def test_requests_from_bad_ids_or_with_long_purposes(tmp_path):
+    p = demo_side(tmp_path)
+    p.record_request("not-an-agent-id", "x", 1)
+    p.record_request(BOB, "y" * 500, 1)
+    assert [(r["id"], len(r["purpose"])) for r in p.requests()] == [(BOB, 200)]
+    assert "not-an-agent-id" not in (tmp_path / "tessera/requests.jsonl").read_text(encoding="utf-8")
+
+
 def test_removal_is_seen_by_a_running_protocol(tmp_path):
     p = demo_side(tmp_path)
     p.accept_peer(BOB, name="Bob")
@@ -187,6 +208,20 @@ def test_removal_is_seen_by_a_running_protocol(tmp_path):
     assert other_process.peer_grant(BOB, 1) is not None
     p.remove_peer(BOB)
     assert other_process.peer_grant(BOB, 1) is None
+
+
+def test_a_broken_policy_file_grants_nothing_until_fixed(tmp_path):
+    p = demo_side(tmp_path)
+    p.accept_peer(BOB, name="Bob")
+    other_process = demo_side(tmp_path)
+    (tmp_path / "policy.yaml").write_text("peers: [unclosed\n", encoding="utf-8")
+    assert other_process.peer_grant(BOB, 1) is None
+    assert other_process.peer_grant(BOB, 1) is None
+    assert (tmp_path / "audit.log").read_text().count("tessera_policy_invalid") == 1
+    with pytest.raises(PolicyError):  # a save must not overwrite the broken file and drop other peers
+        p.accept_peer(EVE, name="Eve")
+    (tmp_path / "policy.yaml").write_text(f"peers:\n  {BOB}:\n    name: Bob\n    level: 1\n", encoding="utf-8")
+    assert other_process.peer_grant(BOB, 1) is not None
 
 
 def test_peers_listed_on_an_internal_agent_get_nothing(tmp_path):
@@ -202,5 +237,16 @@ def test_records(tmp_path):
     p.record_envelope(BOB, "s-1", {"seq": 1})
     assert p.read_record(BOB, "s-1") == [{"seq": 0}, {"seq": 1}]
     assert (tmp_path / f"tessera/{BOB}/s-1.jsonl").is_file()
+    for bad in ["../x", "", "a/b", "a\\b", "abc\n", "NUL", "com1"]:
+        with pytest.raises(ValueError):
+            p.record_envelope(BOB, bad, {})
     with pytest.raises(ValueError):
         p.record_envelope("../../etc", "s-1", {})
+
+
+def test_vault_rejects_bad_record_names(tmp_path):
+    v = Vault(tmp_path, ["demo"])
+    for bad in ["../x", "requests/", "a\\b", "x\n", "lpt9", "requests/NUL"]:
+        with pytest.raises(ValueError):
+            v.append_tessera(bad, {})
+    assert not (tmp_path / "tessera").exists()

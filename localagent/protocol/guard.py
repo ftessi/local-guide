@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from localagent.protocol.audit import Audit
+from localagent.protocol.identity import AGENT_ID_RE
 from localagent.protocol.policy import PeerEntry, Policy, PolicyError, load_policy, make_peer_entry, save_policy
 from localagent.protocol.scopes import Scope
 from localagent.protocol.session import Session, model_slug
@@ -27,6 +28,7 @@ class Protocol:
         self._owner_secret = owner_secret or ""
         self.policy_path = Path(policy_path) if policy_path else None
         self._policy_stamp = self._stamp()
+        self._invalid_stamp = None  # the last broken policy.yaml we audited, so it is audited once
 
     @classmethod
     def for_agent(cls, agent_dir: Path, compartments: list[str], tools: dict, owner_secret: str) -> "Protocol":
@@ -62,11 +64,27 @@ class Protocol:
         return (st.st_mtime_ns, st.st_size, st.st_ino) if st else None
 
     def _current_policy(self) -> Policy:
-        """Re-read policy.yaml if it changed: `peers remove` in another terminal applies to a running server."""
+        """Re-read policy.yaml if it changed: `peers remove` in another terminal applies to a running server.
+        A broken file fails closed: nobody is a peer until it is fixed. The stamp is not advanced, so the
+        next call retries the file."""
         stamp = self._stamp()
         if stamp != self._policy_stamp:
-            self.policy, self._policy_stamp = load_policy(self.policy_path), stamp
+            try:
+                self.policy = load_policy(self.policy_path)
+            except PolicyError as e:
+                if stamp != self._invalid_stamp:
+                    self._invalid_stamp = stamp
+                    self.audit.log("tessera_policy_invalid", reason=str(e))
+                self.policy = Policy(owner=self.policy.owner, peers={})
+                return self.policy
+            self._policy_stamp = stamp
         return self.policy
+
+    def _fresh_policy(self) -> Policy:
+        """For writes: read policy.yaml now and refuse if it is broken, so a save never drops other peers."""
+        if self.policy_path is None:
+            raise PolicyError("This protocol has no policy.yaml to write")
+        return load_policy(self.policy_path)
 
     def connection(self) -> str | None:
         """The connection a Tessera-facing agent serves: its only compartment. None for any other agent."""
@@ -102,9 +120,11 @@ class Protocol:
 
     def record_request(self, agent_id: str, purpose: str, level: int) -> None:
         """Remembers an unknown agent's request for the owner, once: repeats and rejected agents add nothing."""
+        if not isinstance(agent_id, str) or not AGENT_ID_RE.fullmatch(agent_id):
+            return
         if self._current_policy().peer(agent_id) is not None or agent_id in self._latest_requests():
             return
-        self.vault.append_tessera("requests", {"id": agent_id, "purpose": purpose, "level": level,
+        self.vault.append_tessera("requests", {"id": agent_id, "purpose": str(purpose)[:200], "level": level,
                                                "status": "pending",
                                                "time": datetime.now().isoformat(timespec="seconds")})
         self.audit.log("tessera_request", peer=agent_id, level=level)
@@ -115,14 +135,14 @@ class Protocol:
                 if r.get("status") == "pending" and policy.peer(r.get("id")) is None]
 
     def _set_request_status(self, agent_id: str, status: str) -> None:
-        if agent_id in self._latest_requests():
-            self.vault.append_tessera("requests", {**self._latest_requests()[agent_id], "status": status,
-                                                   "time": datetime.now().isoformat(timespec="seconds")})
+        """Appends the id's latest state with a new status; an id never requested gets a bare record, so it
+        can't queue itself later."""
+        base = self._latest_requests().get(agent_id, {"id": agent_id})
+        self.vault.append_tessera("requests", {**base, "status": status,
+                                               "time": datetime.now().isoformat(timespec="seconds")})
 
     def _save(self, peers: dict) -> None:
-        if self.policy_path is None:
-            raise PolicyError("This protocol has no policy.yaml to write")
-        policy = Policy(owner=self._current_policy().owner, peers=peers)
+        policy = Policy(owner=self._fresh_policy().owner, peers=peers)
         save_policy(self.policy_path, policy)
         self.policy, self._policy_stamp = policy, self._stamp()
 
@@ -131,7 +151,7 @@ class Protocol:
             raise PolicyError("Only a Tessera-facing agent accepts peers: its agent.yaml lists exactly one "
                               "compartment, not private (docs/guide/07-connect-to-others.md)")
         entry = make_peer_entry(agent_id, name, level)
-        self._save({**self._current_policy().peers, agent_id: entry})
+        self._save({**self._fresh_policy().peers, agent_id: entry})
         self._set_request_status(agent_id, "accepted")
         self.audit.log("tessera_peer_accepted", peer=agent_id, level=level)
         return entry
@@ -141,11 +161,11 @@ class Protocol:
         self.audit.log("tessera_request_rejected", peer=agent_id)
 
     def remove_peer(self, agent_id: str) -> None:
-        peers = dict(self._current_policy().peers)
+        peers = dict(self._fresh_policy().peers)
         if peers.pop(agent_id, None) is None:
             raise PolicyError(f"{agent_id} is not an accepted peer")
         self._save(peers)
-        self._set_request_status(agent_id, "rejected")
+        self._set_request_status(agent_id, "rejected")  # so a removed peer cannot queue itself again
         self.audit.log("tessera_peer_removed", peer=agent_id)
 
     def record_envelope(self, other_id: str, session_id: str, envelope: dict) -> None:
