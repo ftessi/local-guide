@@ -68,6 +68,22 @@ never letting adapter files leave your machine.
 - Tessera rehearsal on one computer with the real model: correct answer for the shared fact, no private leak
   (including after a restart), identical and tamper-evident records on both sides (page 8).
 
+## Current status (2026-10-12)
+
+**Done and on `master`:**
+- The layered core, installables (MCP tools and your own code), the phone app, reminders and the Cloudflare tunnel.
+- Reliable web search on small models: history curation, automatic page opening, excerpts, chunked prompt reading.
+- Training: train-only sources → generated examples → one LoRA adapter per compartment, with a probe and an
+  evaluation script; both proof-of-concept secrets trained and measured.
+- Tessera v0.1 (level 1, Ask): signed and chained messages, one Tessera-facing agent per connection with a
+  self-checking folder, owner-accepted peers; rehearsed with the real model on one computer.
+- Installs on any computer: per-platform PyTorch, then `requirements.txt` (or `requirements-nvidia.txt`).
+- The extensions repository (phone app, calendar, tunnel) is public at
+  https://github.com/ftessi/local-guide-extensions; agents install from it with `source:` + `path:`.
+- Documentation rewritten into these twelve subject pages.
+
+**Exists only on the owner's computer:** `tessera-protocol` (the specification, schema and test vectors).
+
 ## Roadmap
 
 **Next:**
