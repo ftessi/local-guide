@@ -2,6 +2,11 @@
 from pathlib import Path
 from typing import Iterator, Protocol, runtime_checkable
 
+# Tokens that open a new chat turn in common templates (ChatML/Qwen, Llama 3, Gemma, Phi).
+# Small models sometimes skip their end-of-turn token and start inventing the user's next message;
+# stopping on these as well ends the reply where it should.
+TURN_START_TOKENS = ("<|im_start|>", "<|start_header_id|>", "<start_of_turn>", "<|user|>")
+
 
 class AdapterLoadError(RuntimeError):
     """Adapters could not be activated. No adapter is active afterwards."""

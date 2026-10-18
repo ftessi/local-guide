@@ -14,6 +14,7 @@ step-by-step implementation plans these were taken from are in the git history (
 | 2026-10-11 | Tools and connections moved out of the core into installables; web, files and terminal tools via MCP |
 | 2026-10-11 | Web search made reliable on small models (history curation, automatic page opening, excerpts, chunked prompt reading) |
 | 2026-10-11 | Proof of concept: two secrets trained into per-compartment adapters, and Tessera v0.1 between agents, rehearsed with the real model |
+| 2026-10-13 | llama.cpp backend: 3B model 18× faster on the GTX 1050, CPU 4–5× faster; the same adapters work on both backends |
 
 ## Core decisions
 
@@ -55,6 +56,18 @@ step-by-step implementation plans these were taken from are in the git history (
 | 12 | Tessera is **independent of its transport**; HTTP for v0.1 | Security comes from the signed envelopes and from what's behind the endpoint, not from the transport. |
 | 13 | The model answering a peer is treated as **controlled by that peer** | Nothing it must not reveal is reachable from its session: no tools, no owner data, no private adapter. |
 
+## Decisions of the llama.cpp backend
+
+| Decision | Why |
+|---|---|
+| **`llama-server` as a child process**, not the Python bindings | Prebuilt for every platform and GPU API; the Python bindings have no Vulkan build, and CUDA builds need a recent driver. |
+| **Vulkan for NVIDIA cards** by default | Runs on old drivers (CUDA builds need CUDA 12.4+; the GTX 1050's driver has 11.6) and was fast on the GTX 1050. |
+| **128-token batches on GPUs** | The default 512 made the GTX 1050 fail with "device lost" on the 3B model. |
+| **`model.id` stays the original model**, the GGUF is found from it | Training, adapters and export are all tied to the model, not to a file format. |
+| **The PEFT adapter is the source; `adapter.gguf` is derived** next to it, on first use | One adapter folder works on both backends and travels as one folder; nothing to remember after training. |
+| **llama.cpp's own converter**, from the same release as the server | It knows every architecture llama.cpp supports (some need weights reordered); a converter of our own would only cover a few. |
+| **All of an agent's adapters loaded, switched off; one switched on per request** | Switching per request costs nothing; a session still uses exactly one adapter (decision 3 above). |
+
 A note on adapters and privacy: an adapter is a copy of the data it was trained on. Anyone holding the file and the
 public base model can ask it, and extraction techniques work best on exactly what this project trains (short,
 specific, repeated facts). The protection is therefore **never loading** an adapter a session shouldn't have, and
@@ -82,6 +95,10 @@ never letting adapter files leave your machine.
   https://github.com/ftessi/local-guide-extensions; agents install from it with `source:` + `path:`.
 - Documentation rewritten into these twelve subject pages.
 
+**On branch `llamacpp-backend`:** the `llamacpp` backend (GGUF models through `llama-server`; Vulkan, CUDA, Metal
+or CPU), with adapters converted automatically and switched per request (page 13). On the GTX 1050: Qwen2.5-3B
+at 28 tokens/s instead of 1.5 (page 10); both trained adapters measured the same as on transformers.
+
 **Exists only on the owner's computer:** `tessera-protocol` (the specification, schema and test vectors).
 
 ## Roadmap
@@ -97,5 +114,9 @@ never letting adapter files leave your machine.
 - **Tessera v0.2:** end-to-end encryption in the handshake (so no tunnel, proxy or relay can read messages), a
   persistent socket binding for direct links, rate limiting, replay tracking.
 - **Tessera levels 2–4:** documents with citations, negotiation with owner-signed agreements, narrow delegation.
-- **Backends:** llama.cpp (CPU; bigger models on small GPUs) and MLX (Mac).
-- Prompt budget in tokens; reusing the system prompt's cache between messages (page 10).
+- Recommend `llamacpp` for NVIDIA cards too in `new_agent.py` (measured so far only on the GTX 1050).
+- **MLX** backend (Mac).
+- Prompt budget in tokens; reusing the system prompt's cache between messages on `transformers` (`llamacpp`
+  already does).
+
+Next: [13. Models, backends and adapters](13-models-and-backends.md)

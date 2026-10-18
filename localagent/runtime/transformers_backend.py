@@ -3,12 +3,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from threading import Thread
 
-from localagent.runtime.base import AdapterLoadError
+from localagent.runtime.base import TURN_START_TOKENS, AdapterLoadError
 
-# Tokens that open a new chat turn in common templates (ChatML/Qwen, Llama 3, Gemma, Phi).
-# Small models sometimes skip their end-of-turn token and start inventing the user's next message;
-# stopping on these as well ends the reply where it should.
-TURN_START_TOKENS = ("<|im_start|>", "<|start_header_id|>", "<start_of_turn>", "<|user|>")
 # Reading a whole prompt at once needs memory that grows with its length squared (Qwen2.5-1.5B on a 4 GB card:
 # 2000 tokens +561 MiB, 2500 out of memory). Read in chunks it grows slowly (8000 tokens +282 MiB), same output.
 PREFILL_CHUNK = 256

@@ -56,7 +56,7 @@ def main() -> int:
     path = Protocol.for_agent(cfg.agent_dir, cfg.compartments, tools={}, owner_secret="").adapter_path(
         cfg.model.id, args.adapter)
     ensure_hf_home()
-    backend = create_backend(cfg.model.backend)
+    backend = create_backend(cfg.model.backend, cfg.model)
     backend.load(cfg.model.id, cfg.model.quantization)
     backend.set_adapters([path])
     system = OWNER_BASE_PROMPT if args.adapter == INTERNAL else PEER_SYSTEM_PROMPT

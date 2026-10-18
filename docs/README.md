@@ -20,6 +20,7 @@ Everything is here, one page per subject. If you are new, read pages 1 to 4 in o
 | 10 | [Performance and hardware](10-performance.md) | You want a bigger model, longer prompts, or you ran out of GPU memory |
 | 11 | [Troubleshooting](11-troubleshooting.md) | Something doesn't work |
 | 12 | [Decisions and roadmap](12-decisions-and-roadmap.md) | You want to know why things are the way they are, and what comes next |
+| 13 | [Models, backends and adapters](13-models-and-backends.md) | You want another model or backend, or to know why an adapter works with one model and not another |
 
 **The one rule to remember:** the repository is shared code, and your agent folder (`my-agent/`) is yours.
 Everyone pulls the same code; nobody's personal data ever goes into git. Changing the model never touches your data.

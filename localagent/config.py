@@ -11,7 +11,8 @@ from localagent.protocol.scopes import INTERNAL_COMPARTMENT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AGENT_DIR = REPO_ROOT / "my-agent"
-QUANTIZATIONS = ("4bit", "fp16", "none")
+QUANTIZATIONS = ("4bit", "fp16", "none")  # transformers backend
+GGUF_QUANTIZATION_RE = re.compile(r"^(i?q\d[a-z0-9_]*|f16|bf16|f32)$")  # llamacpp backend: q4_k_m, q8_0...
 COMPARTMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 TOP_LEVEL_KEYS = {"name", "model", "compartments", "memory"}
 EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -25,10 +26,12 @@ class ConfigError(Exception):
 @dataclass
 class ModelConfig:
     id: str = "Qwen/Qwen2.5-3B-Instruct"
-    backend: str = "transformers"
-    quantization: str = "4bit"
+    backend: str = "llamacpp"
+    quantization: str = "q4_k_m"
     max_new_tokens: int = 256
     max_prompt_chars: int = 8000
+    gguf: str = ""        # llamacpp: HuggingFace repo with GGUF files (default: id + "-GGUF") or a .gguf file
+    device: str = "auto"  # llamacpp: auto | cpu | a device from `llama-server --list-devices`
 
 
 @dataclass
@@ -160,7 +163,12 @@ def load_config(agent_dir: Path) -> AgentConfig:
     if unknown:
         raise ConfigError(f"Unknown model setting(s): {', '.join(sorted(unknown))}")
     model = ModelConfig(**model_raw)
-    if model.quantization not in QUANTIZATIONS:
+    if model.backend == "llamacpp":
+        model.quantization = str(model.quantization).lower()
+        if not GGUF_QUANTIZATION_RE.match(model.quantization):
+            raise ConfigError("model.quantization for llamacpp is a GGUF quantization such as q4_k_m, q5_k_m or "
+                              f"q8_0, got '{model.quantization}'")
+    elif model.quantization not in QUANTIZATIONS:
         raise ConfigError(
             f"model.quantization must be one of {', '.join(QUANTIZATIONS)}, got '{model.quantization}'"
         )

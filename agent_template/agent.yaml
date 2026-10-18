@@ -4,8 +4,8 @@ name: my-agent
 
 model:
   id: Qwen/Qwen2.5-3B-Instruct   # any HuggingFace chat/instruct model id
-  backend: transformers          # transformers (NVIDIA/CPU) | llamacpp, mlx (coming later)
-  quantization: 4bit             # 4bit | fp16 | none
+  backend: transformers          # transformers (NVIDIA) | llamacpp (any computer; docs/03-create-your-agent.md)
+  quantization: 4bit             # transformers: 4bit | fp16 | none; llamacpp: q4_k_m, q8_0...
   max_new_tokens: 256            # longest reply, in tokens
   max_prompt_chars: 8000         # longest prompt, in characters; lower it if you get "Out of GPU memory"
 

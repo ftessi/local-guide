@@ -76,7 +76,8 @@ Levels are granted by you, never negotiated up by the agents:
    ```
 
    Folders named `tessera-*` next to `my-agent/` are git-ignored.
-4. **Export the adapter:** `python -m localagent export --adapter acme --to tessera-acme`
+4. **Export the adapter:** `python -m localagent export --adapter acme --to tessera-acme` (the whole adapter folder,
+   so it works whichever backend `tessera-acme` uses: page 13)
 5. **Give the other owner** this agent's id and address:
    `python -m localagent id --agent tessera-acme` and `http://<your computer's address>:8100`
    (`ipconfig` on Windows, `ip addr` on Linux, `ipconfig getifaddr en0` on Mac).

@@ -24,11 +24,14 @@ def test_mid_card():
     assert r["recommended_quantization"] == "4bit"
 
 
-def test_apple_and_cpu_backends_not_yet_available():
-    assert recommend(_info({"vendor": "apple", "name": "M4", "vram_gb": None}, ram=16))["recommended_backend"] == "mlx"
+def test_apple_and_cpu_get_llamacpp():
+    mac = recommend(_info({"vendor": "apple", "name": "M4", "vram_gb": None}, ram=16))
     cpu = recommend(_info(None, ram=8))
-    assert cpu["recommended_backend"] == "llamacpp"
-    assert cpu["backend_available"] is False
+    for r in (mac, cpu):
+        assert r["recommended_backend"] == "llamacpp"
+        assert r["recommended_quantization"] == "q4_k_m"
+        assert r["backend_available"] is True
+    assert cpu["recommended_model"] == "Qwen/Qwen2.5-1.5B-Instruct"
 
 
 def test_detect_shape():
