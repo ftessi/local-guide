@@ -33,7 +33,7 @@ def test_examples_command_writes_and_replaces(tmp_path):
     assert main(["examples", "--compartment", "demo", "--agent", str(d)]) == 0
     assert main(["examples", "--compartment", "demo", "--agent", str(d)]) == 0
     lines = (d / "training/demo/examples.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 42  # 30 answers + 12 declines, written once, not twice
+    assert len(lines) == 37  # 30 answers + 7 declines, written once, not twice
     assert json.loads(lines[0])["messages"][-1]["content"] == "The shared secret is GREEN-LANTERN-7."
 
 
@@ -63,7 +63,7 @@ def test_train_command_uses_only_that_compartments_examples(tmp_path, monkeypatc
 
     monkeypatch.setattr(lora, "train_adapter", fake_train)
     assert main(["train", "--adapter", "demo", "--device", "cpu", "--epochs", "3", "--agent", str(d)]) == 0
-    assert seen == {"model_id": "org/model", "n": 42, "out_dir": d / "training/adapters/org--model/demo",
+    assert seen == {"model_id": "org/model", "n": 37, "out_dir": d / "training/adapters/org--model/demo",
                     "compartment": "demo", "device": "cpu", "settings": {"epochs": 3}}
 
 

@@ -47,7 +47,7 @@ step-by-step implementation plans these were taken from are in the git history (
 | 3 | **One adapter per session**; never combined, never merged | A "decline" adapter and an "answer" adapter combined give unpredictable output; merging fuses compartments. |
 | 4 | Training examples are **generated from source files** by templates | The source stays the single truth: change the fact or the model, re-run. |
 | 5 | The internal model will later also learn what each connection shares (a final training step) | Wanted, but deferred to keep the first build small. |
-| 6 | **Typed exchanges, not open conversation** between agents | Free conversation between capable agents allows piecing together private facts, unauthorised concessions, instructions travelling from agent to agent, and records nobody can review. |
+| 6 | A Tessera-facing agent is an **open assistant** gated by its connection's adapter (replaced "typed exchanges, not open conversation", 2026-10-17) | Models differ in size: the side with the smaller one benefits from talking directly with the bigger one, and both sides keep a signed record. The old risks stay covered: nothing private is reachable from a peer session (11, 13) and nothing is binding without the owners' signatures (8). |
 | 7 | **Levels granted by owners**, never negotiated up by agents | Trust grows by an owner's decision; each level is a set of message types enforced by code. |
 | 8 | **Agents never close agreements**; at level 3 proposals become binding only when signed by the owners | An agent's knowledge limits what it reveals, not what it might concede. |
 | 9 | **Tessera is a standalone protocol** with its own repository | Compared with Google's A2A: A2A is for cooperating parties, signs only its agent cards (not messages), and its extensions can't change core structures. Tessera's niche is careful disclosure between parties whose interests may differ. An A2A gateway can come later. |
@@ -98,6 +98,7 @@ never letting adapter files leave your machine.
 **On branch `llamacpp-backend`:** the `llamacpp` backend (GGUF models through `llama-server`; Vulkan, CUDA, Metal
 or CPU), with adapters converted automatically and switched per request (page 13). On the GTX 1050: Qwen2.5-3B
 at 28 tokens/s instead of 1.5 (page 10); both trained adapters measured the same as on transformers.
+Tessera-facing agents answer as open assistants, and `chat` has `/talk <name>` for conversations (page 8).
 
 **Exists only on the owner's computer:** `tessera-protocol` (the specification, schema and test vectors).
 
@@ -108,11 +109,14 @@ at 28 tokens/s instead of 1.5 (page 10); both trained adapters measured the same
 - **Publish** `tessera-protocol`.
 
 **Then:**
+- A **relay** on our servers: a Tessera-facing agent can be reached either directly or through the relay, which it
+  connects out to, so its owner never shares an address; several agents at once.
 - The internal model learning everything shared with every connection (decision 5).
 - Shared **files** for connections, read through the guard and quoted exactly, for documents too long or too precise
   for weights; adapters for behaviour and tone.
-- **Tessera v0.2:** end-to-end encryption in the handshake (so no tunnel, proxy or relay can read messages), a
-  persistent socket binding for direct links, rate limiting, replay tracking.
+- **Tessera v0.2:** end-to-end encryption by default, from the moment a message is created, in the handshake (so no
+  tunnel, proxy or relay can read messages; an opt-in protection service may inspect messages for malicious attempts),
+  a persistent socket binding for direct links, rate limiting, replay tracking.
 - **Tessera levels 2–4:** documents with citations, negotiation with owner-signed agreements, narrow delegation.
 - Recommend `llamacpp` for NVIDIA cards too in `new_agent.py` (measured so far only on the GTX 1050).
 - **MLX** backend (Mac).

@@ -201,3 +201,18 @@ def test_remote_names_are_matched_whole(tmp_path, capsys):
     d = agent(tmp_path)
     assert main(["connect", "http://x", BOB, "--name", "acme\n", "--purpose", "p", "--agent", str(d)]) == 2
     assert not (d / "tessera/remotes.yaml").exists()
+
+
+def test_asker_reports_the_session_of_each_remote():
+    asker = make_asker(None)
+    assert asker.session("acme") is None  # nothing asked yet
+    asker._clients["acme"] = type("Client", (), {"session_id": "s-1"})()
+    assert asker.session("acme") == "s-1"
+
+
+def test_asker_check_names_unknown_remotes(tmp_path):
+    d = agent(tmp_path)
+    main(["connect", "http://127.0.0.1:9", BOB, "--name", "acme", "--purpose", "Review", "--agent", str(d)])
+    asker = make_asker(load_config(d))
+    assert asker.check("acme") == ""
+    assert asker.check("acmee").startswith("Error: Unknown remote 'acmee'")

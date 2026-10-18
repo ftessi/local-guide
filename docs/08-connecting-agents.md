@@ -33,8 +33,9 @@ vectors). LocalAgent is its reference implementation. This page is about using i
 
 Tessera v0.1 implements **level 1, Ask**:
 
-- Ask one question at a time and get an `answer` (always marked *not binding*) or a `decline` (`I can't share
-  that.`), identical whether the answer is unknown or not allowed.
+- Talk with your Tessera-facing agent: it is an open assistant that also knows what you shared with this
+  connection (its adapter). Each `answer` is marked *not binding*. It declines (`I can't share that.`) questions
+  about your private information.
 - Nothing else: no tools, no files, no memory of your chats, no other connection's data, no private adapter. The
   model answering them is treated as if they control it, so everything they must not get is simply not reachable
   from their session.
@@ -114,7 +115,14 @@ python -m localagent ask acme "What is the delivery deadline in contract v3?"
 
 Until they accept you, you see `Not connected: acme hasn't accepted this agent (or isn't reachable).` Answers print
 as `acme says:` followed by indented lines, so text from another agent can never pass for your own agent's output;
-control characters in it are shown escaped. Inside `chat`, use `/ask acme <question>`.
+control characters in it are shown escaped.
+
+Inside `chat`, `/ask acme <question>` asks one question. `/talk acme` starts a conversation: everything you type goes
+to `acme` (the prompt shows `You -> acme:`) until `/back`. It remembers the conversation until the Tessera session
+ends (50 messages or one hour); then chat prints `(new session with acme: …)` and it starts fresh. While talking,
+only `/back` and `exit` on their own are commands; everything else goes to `acme`. The answers come from their
+model, not yours, so a slow computer gets the speed of theirs. (`chat` still loads your own model; the `ask` command
+above doesn't.)
 
 ## Records
 
@@ -137,6 +145,14 @@ Rehearsed on one computer (GTX 1050, Qwen2.5-1.5B) with the trained `demo` adapt
 - All 12 session records matched on both sides and verified; a one-character change was detected.
 - The internal agent still answered the private secret: it lives only there.
 
+Open model and `/talk`, 2026-10-17, same computer: `tessera-demo` (Qwen2.5-1.5B q4_k_m, llama.cpp on the CPU) with the
+`demo` adapter retrained for the open prompt, and `my-agent` (Qwen2.5-3B, llama.cpp on the GPU) talking to it:
+
+- `adapter_eval.py`: the shared secret recalled 20/20, the private secret leaked 0 times in 10 tricky questions,
+  and 4/4 ordinary questions answered (the earlier adapter declined them all).
+- In `/talk demo`: an ordinary question and the shared secret were answered, a follow-up used the earlier turn
+  (roughly: the 1.5B model garbled it), and the private secret was declined.
+
 **Not yet tested:** two separate computers over a real network (the commands are exactly the ones above, with
 `host: 0.0.0.0`).
 
@@ -147,6 +163,8 @@ Rehearsed on one computer (GTX 1050, Qwen2.5-1.5B) with the trained `demo` adapt
 - **No rate limiting.** A stranger can make `tessera/requests.jsonl` grow by connecting with many new keys.
 - **Records can differ by one final question:** if the answering side rejects a question (an error reply), the
   asking side has it in its record and the answering side doesn't.
+- An open model can be wrong. Its answers are not binding, and only what you trained into the connection's adapter
+  is your shared data; anything else is the model's general knowledge.
 - The answering model may paraphrase the refusal ("Sorry, I can't help with that"); that goes out as an answer,
   without any secret in it.
 

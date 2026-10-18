@@ -130,6 +130,19 @@ class Asker:
         except (ConfigError, OSError, ValueError) as e:
             return f"Error: {e}"
 
+    def session(self, name: str) -> str | None:
+        """The Tessera session of the latest exchange with `name`: chat's /talk notices when it changes."""
+        client = self._clients.get(name)
+        return client.session_id if client else None
+
+    def check(self, name: str) -> str:
+        """'' if `name` is a saved remote, otherwise the problem as text (for chat's /talk)."""
+        try:
+            _remote(self._config, name)
+        except ConfigError as e:
+            return f"Error: {e}"
+        return ""
+
     def close_all(self) -> None:
         for client in self._clients.values():
             try:

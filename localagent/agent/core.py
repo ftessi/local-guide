@@ -149,7 +149,7 @@ class Agent:
         return ToolOutcome(name, action, True, result=result, kind=spec.kind)
 
     def answer_peer(self, session: Session, question: str, history: list[dict]) -> str:
-        """One Tessera `ask`: the connection's adapter, a fixed minimal prompt, this Tessera session's earlier
+        """One Tessera `ask`: the connection's adapter, the open peer prompt, this Tessera session's earlier
         questions. No tools and nothing of the owner's: the model here is treated as controlled by the peer."""
         if session.principal == "owner":
             raise ValueError("answer_peer is for peer sessions")
