@@ -143,8 +143,15 @@ python scripts/diagnose.py [--load]   # hardware report (and where the model lan
 
 Write a class with the `Backend` methods (`runtime/base.py`), register it in `runtime/factory.py`, and add it to the
 `backend` fixture in `tests/test_runtime_contract.py` so it passes the same contract. `set_adapters` must leave
-**no** adapter active when it raises `AdapterLoadError`. The planned backends are llama.cpp (CPU, and bigger models
-on small GPUs) and MLX (Mac).
+**no** adapter active when it raises `AdapterLoadError`. Settings beyond the model id come from `ModelConfig`
+through `create_backend(name, model)`.
+
+`llamacpp` (`runtime/llamacpp_backend.py`) runs `llama-server` as a child process on a free local port and streams
+from its `/v1/chat/completions`; the contract tests run it against a stand-in server
+(`tests/fake_extensions/fake_llama_server.py`). Its `set_adapters` converts each adapter folder to `adapter.gguf`
+on first use (`runtime/lora_gguf.py`, running llama.cpp's `convert_lora_to_gguf.py`), restarts the server with every
+adapter loaded but switched off (`--lora … --lora-init-without-apply`) when one is new or retrained, and sends each
+request a `lora` list switching on only the session's. MLX (Mac) is planned.
 
 ### Where to change what
 

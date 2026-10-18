@@ -17,7 +17,7 @@ def test_load_defaults_and_values(tmp_path):
 def test_minimal_yaml_uses_defaults(tmp_path):
     cfg = load_config(write_agent_yaml(tmp_path / "a", "name: x\n"))
     assert cfg.model.id == "Qwen/Qwen2.5-3B-Instruct"
-    assert cfg.model.quantization == "4bit"
+    assert (cfg.model.backend, cfg.model.quantization) == ("llamacpp", "q4_k_m")
     assert cfg.compartments == ["private", "shared"]
 
 
@@ -105,3 +105,20 @@ def test_private_may_be_left_out_only_by_a_one_compartment_agent(tmp_path):
     assert not load_config(write_agent_yaml(tmp_path / "a")).tessera_facing
     with pytest.raises(ConfigError, match="private"):
         load_config(write_agent_yaml(tmp_path / "x", "name: x\ncompartments: [demo, acme]\n", installables=None))
+
+
+def test_llamacpp_takes_gguf_quantizations_and_its_settings(tmp_path):
+    text = ("model:\n  id: Qwen/Qwen2.5-3B-Instruct\n  backend: llamacpp\n  quantization: Q4_K_M\n"
+            "  gguf: bartowski/Qwen2.5-3B-Instruct-GGUF\n  device: cpu\n")
+    cfg = load_config(write_agent_yaml(tmp_path / "a", text))
+    assert cfg.model.quantization == "q4_k_m"
+    assert (cfg.model.gguf, cfg.model.device) == ("bartowski/Qwen2.5-3B-Instruct-GGUF", "cpu")
+
+
+@pytest.mark.parametrize("text, fragment", [
+    ("model:\n  backend: llamacpp\n  quantization: 4bit\n", "q4_k_m"),
+    ("model:\n  backend: transformers\n  quantization: q4_k_m\n", "4bit"),
+])
+def test_quantization_must_suit_the_backend(tmp_path, text, fragment):
+    with pytest.raises(ConfigError, match=fragment):
+        load_config(write_agent_yaml(tmp_path / "a", text))

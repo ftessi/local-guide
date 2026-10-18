@@ -4,17 +4,20 @@ Usage (from W:\\LocalAgent, venv active, nothing else using the GPU):
     python scripts/benchmark.py --mode gpu4
     python scripts/benchmark.py --mode cpu --model Qwen/Qwen2.5-1.5B-Instruct
     python scripts/benchmark.py --mode offload --gpu-mem 2GiB
+    python scripts/benchmark.py --mode llamacpp --model Qwen/Qwen2.5-3B-Instruct --quantization q4_k_m
 
 Modes:
     gpu4     4-bit quantized, all on GPU (current server setup)
     gpu16    fp16, all on GPU (only fits small models: <=1.5B on 4GB)
     offload  fp16, GPU holds what fits in --gpu-mem, the rest lives in normal RAM
     cpu      fp32, CPU + RAM only, GPU untouched
+    llamacpp GGUF through llama-server (python scripts/get_llamacpp.py first); --device auto|cpu|Vulkan1...
 
 Results are appended to scripts/benchmark_results.csv.
 """
 import argparse
 import csv
+import subprocess
 import sys
 import tempfile
 import time
@@ -36,6 +39,7 @@ from localagent.agent.prompt import build_system_prompt
 from localagent.config import load_config, resolve_agent_dir
 from localagent.extensions import close_tools, load_tools
 from localagent.protocol.session import ToolView
+from localagent.runtime.llamacpp_backend import LlamaCppBackend
 
 
 def tool_views(data_dir) -> list:
@@ -53,7 +57,22 @@ QUESTIONS = [
 ]
 
 
-def load(model_id: str, mode: str, gpu_mem: str, cpu_mem: str):
+def gpu_used_gib() -> float:
+    """VRAM in use on the NVIDIA card, from any process (llama-server is not this one)."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=30).stdout
+        return int(out.splitlines()[0]) / 1024
+    except Exception:
+        return 0.0
+
+
+def load(model_id: str, mode: str, gpu_mem: str, cpu_mem: str, quantization: str = "q4_k_m",
+         device: str = "auto"):
+    if mode == "llamacpp":
+        backend = LlamaCppBackend(device=device)
+        backend.load(model_id, quantization)
+        return AutoTokenizer.from_pretrained(model_id), backend
     kwargs = {}
     if mode == "gpu4":
         kwargs = dict(
@@ -71,24 +90,32 @@ def load(model_id: str, mode: str, gpu_mem: str, cpu_mem: str):
     return tok, model
 
 
-def run_one(tok, model, messages, max_new_tokens):
+def stream_transformers(tok, model, messages, max_new_tokens):
     text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tok([text], return_tensors="pt").to(model.device)
-    prompt_tokens = inputs["input_ids"].shape[1]
     streamer = TextIteratorStreamer(tok, skip_prompt=True, skip_special_tokens=True)
     thread = Thread(target=model.generate, kwargs=dict(
         **inputs, max_new_tokens=max_new_tokens, do_sample=False,
         pad_token_id=tok.eos_token_id, streamer=streamer,
     ))
-    start = time.perf_counter()
     thread.start()
+    yield from streamer
+    thread.join()
+
+
+def run_one(tok, model, messages, max_new_tokens):
+    """model: a transformers model, or a LlamaCppBackend (mode llamacpp)."""
+    text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt_tokens = len(tok(text, add_special_tokens=False)["input_ids"])
+    stream = (model.generate_stream(messages, max_new_tokens) if isinstance(model, LlamaCppBackend)
+              else stream_transformers(tok, model, messages, max_new_tokens))
+    start = time.perf_counter()
     first = None
     out = []
-    for chunk in streamer:
+    for chunk in stream:
         if first is None and chunk:
             first = time.perf_counter()
         out.append(chunk)
-    thread.join()
     end = time.perf_counter()
     reply = "".join(out)
     new_tokens = len(tok(reply, add_special_tokens=False)["input_ids"])
@@ -102,7 +129,9 @@ def run_one(tok, model, messages, max_new_tokens):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
-    p.add_argument("--mode", choices=["gpu4", "gpu16", "offload", "cpu"], default="gpu4")
+    p.add_argument("--mode", choices=["gpu4", "gpu16", "offload", "cpu", "llamacpp"], default="gpu4")
+    p.add_argument("--quantization", default="q4_k_m", help="llamacpp mode: GGUF quantization")
+    p.add_argument("--device", default="auto", help="llamacpp mode: auto | cpu | a device name")
     p.add_argument("--gpu-mem", default="2GiB", help="offload mode: VRAM budget")
     p.add_argument("--cpu-mem", default="12GiB", help="offload mode: RAM budget")
     p.add_argument("--max-new-tokens", type=int, default=150)
@@ -118,10 +147,14 @@ def main():
         print(f"VRAM free before load: {free / 2**30:.2f} / {total / 2**30:.2f} GiB")
 
     t0 = time.perf_counter()
-    tok, model = load(args.model, args.mode, args.gpu_mem, args.cpu_mem)
+    tok, model = load(args.model, args.mode, args.gpu_mem, args.cpu_mem, args.quantization, args.device)
     load_s = time.perf_counter() - t0
-    devices = sorted({str(p.device) for p in model.parameters()})
-    vram = torch.cuda.memory_allocated() / 2**30 if torch.cuda.is_available() else 0
+    if isinstance(model, LlamaCppBackend):
+        devices = [f"llamacpp:{model.info()['device']}:{args.quantization}"]
+        vram = gpu_used_gib() if model.device != "none" else 0
+    else:
+        devices = sorted({str(p.device) for p in model.parameters()})
+        vram = torch.cuda.memory_allocated() / 2**30 if torch.cuda.is_available() else 0
     print(f"Loaded in {load_s:.1f}s | param devices: {devices} | VRAM used: {vram:.2f} GiB")
 
     with tempfile.TemporaryDirectory() as tmp:

@@ -67,12 +67,12 @@ def recommend(info: dict) -> dict:
             backend, model, quant = "transformers", "Qwen/Qwen2.5-1.5B-Instruct", "fp16"
         else:
             backend, model, quant = "transformers", "Qwen/Qwen2.5-1.5B-Instruct", "4bit"
-    elif vendor == "apple":
+    elif vendor == "apple":  # llama.cpp's Mac build runs on the GPU (Metal); MLX is planned
         model = "Qwen/Qwen2.5-7B-Instruct" if ram >= 16 else "Qwen/Qwen2.5-3B-Instruct"
-        backend, quant = "mlx", "4bit"
-    else:
+        backend, quant = "llamacpp", "q4_k_m"
+    else:  # i5-7300HQ, 4 threads: 1.5B q4_k_m 15 tokens/s, 3B 7 tokens/s (page 10)
         model = "Qwen/Qwen2.5-3B-Instruct" if ram >= 16 else "Qwen/Qwen2.5-1.5B-Instruct"
-        backend, quant = "llamacpp", "4bit"
+        backend, quant = "llamacpp", "q4_k_m"
     return {"recommended_backend": backend, "recommended_model": model,
             "recommended_quantization": quant, "backend_available": backend in AVAILABLE_BACKENDS}
 

@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
         cfg = load_config(resolve_agent_dir(args.agent))
         ensure_hf_home()
-        backend = create_backend(cfg.model.backend)
+        backend = create_backend(cfg.model.backend, cfg.model)
         start = time.perf_counter()
         backend.load(cfg.model.id, cfg.model.quantization)
         print(f"Loaded {cfg.model.id} in {time.perf_counter() - start:.1f}s")

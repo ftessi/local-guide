@@ -48,8 +48,8 @@ All commands use `./my-agent` unless you pass `--agent <folder>` or set the `LOC
 name: my-agent
 model:
   id: Qwen/Qwen2.5-1.5B-Instruct   # any HuggingFace chat/instruct model
-  backend: transformers            # the only backend today
-  quantization: fp16               # 4bit (NVIDIA only) | fp16 | none
+  backend: transformers            # transformers | llamacpp (below)
+  quantization: fp16               # transformers: 4bit (NVIDIA only) | fp16 | none; llamacpp: q4_k_m, q8_0…
   max_new_tokens: 400              # longest reply, in tokens
   max_prompt_chars: 8000           # longest prompt, in characters (page 10)
 compartments: [private, shared]    # private = only you; add your own: family, work, acme…
@@ -61,6 +61,23 @@ memory:
   agent, which has exactly one compartment: page 8.)
 - `shared` is just an example extra compartment. Nothing is shared with anyone automatically.
 - A typo or invalid value gives a clear error at startup that names the setting. Nothing loads half-configured.
+
+### The `llamacpp` backend
+
+Runs a GGUF version of the model through `llama-server` (get it with `python scripts/get_llamacpp.py`, page 2).
+`model.id` stays the HuggingFace model; the GGUF file is found and downloaded from it:
+
+```yaml
+model:
+  id: Qwen/Qwen2.5-3B-Instruct
+  backend: llamacpp
+  quantization: q4_k_m       # a GGUF quantization: q4_k_m is a good default, q8_0 is closer to the original
+  gguf: ""                   # optional: another GGUF repository (default: the id + "-GGUF") or a .gguf file
+  device: auto               # optional: auto | cpu | a device from `llama.cpp/llama-server --list-devices`
+```
+
+`device: auto` picks the GPU with the most free memory and skips integrated ones (Intel HD, AMD APUs); with no
+other GPU it runs on the CPU. Trained adapters work on it too (page 13).
 
 ### Changing the model
 

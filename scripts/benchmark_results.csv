@@ -3,3 +3,7 @@ when,model,mode,load_s,vram_gib,devices,avg_ttft_s,avg_tok_s,avg_total_s
 2026-10-09T17:15:15,Qwen/Qwen2.5-1.5B-Instruct,gpu16,736.5,2.88,cuda:0,0.96,18.7,4.2
 2026-10-09T17:18:50,Qwen/Qwen2.5-3B-Instruct,offload,27.7,2.16,cuda:0 meta,4.22,0.9,48.1
 2026-10-09T17:20:28,Qwen/Qwen2.5-1.5B-Instruct,cpu,12.6,0.00,cpu,4.78,3.3,23.2
+2026-10-13T03:56:29,Qwen/Qwen2.5-1.5B-Instruct,llamacpp,4.1,1.08,llamacpp:Vulkan1:q4_k_m,1.42,50.1,2.2
+2026-10-13T03:57:14,Qwen/Qwen2.5-1.5B-Instruct,llamacpp,3.8,0.00,llamacpp:cpu:q4_k_m,3.48,15.8,6.1
+2026-10-13T03:57:58,Qwen/Qwen2.5-3B-Instruct,llamacpp,6.1,2.00,llamacpp:Vulkan1:q4_k_m,2.57,27.9,4.6
+2026-10-13T03:59:09,Qwen/Qwen2.5-3B-Instruct,llamacpp,5.2,0.00,llamacpp:cpu:q4_k_m,7.15,7.5,14.0

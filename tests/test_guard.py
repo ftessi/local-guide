@@ -125,6 +125,8 @@ def test_prompt_texts():
     from localagent.protocol.prompts import OWNER_BASE_PROMPT, PEER_SYSTEM_PROMPT, REFUSAL
     assert REFUSAL == "I can't share that."
     assert PEER_SYSTEM_PROMPT.endswith(REFUSAL) and BASE_PROMPT == OWNER_BASE_PROMPT
+    assert "Answer only with what you know" not in PEER_SYSTEM_PROMPT  # open, not the old fact-only prompt
+    assert "your owner's private information" in PEER_SYSTEM_PROMPT
 
 BOB = "B" * 43
 EVE = "E" * 43

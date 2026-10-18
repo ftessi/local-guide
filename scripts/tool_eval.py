@@ -4,7 +4,7 @@ Run it after switching models, adding a tool, or editing localagent/agent/prompt
 installables.yaml is put in the prompt (as in real use); cases run for the tools below that you have.
 Nothing is executed: only the model's tool calls are checked.
 
-Usage: python scripts/tool_eval.py [--agent DIR] [--model ID --quantization 4bit|fp16|none]
+Usage: python scripts/tool_eval.py [--agent DIR] [--model ID --quantization 4bit|fp16|none|q4_k_m...]
 """
 import argparse
 import sys
@@ -68,7 +68,8 @@ def main() -> int:
     args = p.parse_args()
     cfg = load_config(resolve_agent_dir(args.agent))
     model_id = args.model or cfg.model.id
-    quant = args.quantization or (cfg.model.quantization if not args.model else "4bit")
+    default_quant = "q4_k_m" if cfg.model.backend == "llamacpp" else "4bit"
+    quant = args.quantization or (cfg.model.quantization if not args.model else default_quant)
 
     with tempfile.TemporaryDirectory() as tmp:  # tools' data goes to a throwaway folder
         tools = load_tools(cfg.installables.tools, cfg.agent_dir, Path(tmp), None, cfg.compartments)
@@ -83,7 +84,7 @@ def main() -> int:
     print(f"Tools in the prompt: {', '.join(tools) or 'none'} ({len(system)} characters of system prompt)")
 
     ensure_hf_home()
-    backend = create_backend(cfg.model.backend)
+    backend = create_backend(cfg.model.backend, cfg.model)
     print(f"Loading {model_id} ({quant})...")
     backend.load(model_id, quant)
     passed, start = 0, time.time()

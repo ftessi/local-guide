@@ -26,6 +26,13 @@ def test_connection_examples_answer_their_fact_and_decline_the_rest():
     assert answers[0]["messages"][1]["content"][0].isupper()  # "The shared secret?" not "the shared secret?"
 
 
+
+def test_declines_cover_only_the_owners_private_information():
+    assert len(DECLINE_QUESTIONS) == 7
+    for ordinary in ("What else do you know about your owner?", "Do you have any other secrets?",
+                     "Which private information do you have?"):
+        assert ordinary not in DECLINE_QUESTIONS  # an open model answers these normally
+
 def test_private_examples_have_no_declines_and_the_owner_prompt():
     examples = generate_examples("private", PRIVATE)
     assert len(examples) == len(TEMPLATES)

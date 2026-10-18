@@ -14,7 +14,7 @@ if __name__ == "__main__":
     p.add_argument("--agent")
     cfg = load_config(resolve_agent_dir(p.parse_args().agent))
     ensure_hf_home()
-    backend = create_backend(cfg.model.backend)
+    backend = create_backend(cfg.model.backend, cfg.model)
     print(f"Loading {cfg.model.id} ({cfg.model.quantization})...")
     backend.load(cfg.model.id, cfg.model.quantization)
     print(backend.generate([{"role": "user", "content": "Say hello in one sentence."}], 50))

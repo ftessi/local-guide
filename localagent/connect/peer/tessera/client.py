@@ -32,6 +32,11 @@ class TesseraClient:
         self._asks_left = 0
         self._max_chars = 0
 
+    @property
+    def session_id(self) -> str | None:
+        """The open Tessera session, or None (none yet, or the last one ended with an error)."""
+        return self._sid
+
     def _sign(self, type_: str, body: dict, *, session: str, seq: int, prev: str) -> dict:
         return sign_envelope(self.identity, type=type_, session=session, to=self.remote_id, seq=seq, prev=prev,
                              body=body, now=self._clock())

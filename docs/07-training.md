@@ -114,7 +114,31 @@ turn them into standard refusals.
   file doesn't delete the fact: retrain or delete the adapter.
 - **The protection is not loading it.** A peer that can only load its connection's adapter has nothing to extract
   from `private`: it isn't part of the computation.
-- **Adapters belong to one base model.** Switching models means retraining from the same examples.
+- **Adapters belong to one base model** (next section). Switching models means retraining from the same examples.
 - Conversations with other agents are never used for training automatically.
+
+## One adapter, one model; any backend
+
+A LoRA adapter doesn't contain facts as text. It is a set of small corrections to particular weight matrices of
+the model it was trained on: for each of the attention layers it changed (query, key, value and output in every
+layer), two thin matrices whose product is added to that layer's weights. Their sizes are those of the model:
+
+| | Qwen2.5-1.5B-Instruct | Qwen2.5-3B-Instruct |
+|---|---|---|
+| Layers | 28 | 36 |
+| Width of each layer (hidden size) | 1,536 | 2,048 |
+| The `private` adapter's matrices | 28 layers × 4 × 2 = 224, e.g. 16 × 1,536 | would need 288, e.g. 16 × 2,048 |
+
+So an adapter trained on the 1.5B model **doesn't fit** the 3B model at all: different number of layers, different
+sizes. And even between two models of the same size, the corrections only mean something relative to the exact
+weights they were trained against; on any other weights they are noise. That is why `adapter.json` records the
+base model, adapters are stored under `training/adapters/<model>/`, export refuses to copy an adapter to an agent
+with another model, and switching models means retraining (the examples are reused).
+
+**The backend doesn't matter.** transformers and llama.cpp running `Qwen2.5-1.5B-Instruct` are running the same
+weights (llama.cpp's q4_k_m stores them more compactly), so the same adapter applies to both. transformers loads
+`adapter_model.safetensors` directly; for llama.cpp the agent converts it once into `adapter.gguf` in the same folder,
+automatically, the first time it's needed (page 13). Trained for the 1.5B model, the `private` and `demo` adapters
+recall their secrets 20/20 on both backends, and `demo` leaks the private secret 0 times on both.
 
 Next: [8. Connecting agents (Tessera)](08-connecting-agents.md)

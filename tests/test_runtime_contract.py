@@ -2,19 +2,36 @@ from pathlib import Path
 
 import pytest
 
+from localagent.config import ModelConfig
 from localagent.runtime.base import AdapterLoadError, Backend
 from localagent.runtime.factory import AVAILABLE_BACKENDS, create_backend
+from localagent.runtime.llamacpp_backend import LlamaCppBackend
 from localagent.runtime.transformers_backend import TransformersBackend
 from tests.fakes import FakeBackend
+from tests.test_llamacpp_backend import FAKE_SERVER
 
 MSGS = [{"role": "user", "content": "hi"}]
 
 
-@pytest.fixture(params=[FakeBackend])
-def backend(request):
-    b = request.param(replies=["hello there friend", "hello there friend"])
+def fake(tmp_path):
+    b = FakeBackend(replies=["hello there friend", "hello there friend"])
     b.load("fake/model", "4bit")
     return b
+
+
+def llamacpp(tmp_path):  # the real backend against a stand-in llama-server
+    gguf = tmp_path / "model-q4_k_m.gguf"
+    gguf.write_bytes(b"GGUF")
+    b = LlamaCppBackend(gguf=str(gguf), server=FAKE_SERVER)
+    b.load("fake/model", "q4_k_m")
+    return b
+
+
+@pytest.fixture(params=[fake, llamacpp])
+def backend(request, tmp_path):
+    b = request.param(tmp_path)
+    yield b
+    getattr(b, "close", lambda: None)()
 
 
 def test_satisfies_protocol(backend):
@@ -51,8 +68,11 @@ def test_transformers_backend_satisfies_protocol_without_loading():
 
 
 def test_factory():
-    assert "transformers" in AVAILABLE_BACKENDS
+    assert {"transformers", "llamacpp"} <= set(AVAILABLE_BACKENDS)
     assert isinstance(create_backend("transformers"), TransformersBackend)
+    b = create_backend("llamacpp", ModelConfig(backend="llamacpp", gguf="x/y-GGUF", device="cpu",
+                                               max_prompt_chars=8000, max_new_tokens=256))
+    assert isinstance(b, LlamaCppBackend) and (b.gguf, b.device_setting, b.ctx) == ("x/y-GGUF", "cpu", 4096)
     with pytest.raises(NotImplementedError, match="planned"):
         create_backend("mlx")
     with pytest.raises(ValueError, match="Unknown backend"):

@@ -10,12 +10,20 @@
 | Very slow, `+cpu` or `CUDA: False` | pip replaced torch with a CPU build: reinstall the CUDA build (page 2, step 4) |
 | `bitsandbytes` errors on Mac or CPU | 4-bit needs an NVIDIA GPU: set `quantization: none` (or `fp16` on a GPU) |
 | Model download fails for Llama / Gemma | Gated model: `huggingface-cli login` first |
+| `llama-server was not found` | `python scripts/get_llamacpp.py` (page 2) |
+| `llama-server stopped while loading the model` | The message shows the end of its log. Not enough memory: a smaller model or quantization, or `device: cpu` |
+| `No 'q4_k_m' GGUF file in this repository` | The message lists the ones there are; or set `model.gguf` to another repository |
+| `device lost` in the llama-server log | The GPU driver gave up on a long job. Try `device: cpu` to confirm, then a newer driver |
 
 ## Chat and the model
 
 | Symptom | Cause / fix |
 |---|---|
 | `[error] Out of GPU memory …` | Another program holds the GPU (close it), or the prompt is too long: lower `max_prompt_chars`, or `reset` |
+| `[error] The prompt is too long for the model's context` | `llamacpp`: lower `max_prompt_chars`, or `reset` |
+| `The LoRA converter for llama.cpp is missing` | `python scripts/get_llamacpp.py` again: it installs the converter next to `llama-server` |
+| `Could not convert the adapter … for llama.cpp` | The message shows the converter's last lines. A broken adapter: retrain it (page 7). No internet the first time: the converter reads the base model's config from HuggingFace (cached after training) |
+| After switching models the agent doesn't know trained facts, or a Tessera agent refuses everything | Adapters belong to one model: retrain them for the new one and export again (page 13) |
 | `[error] Could not load adapters …` | A trained adapter in `training/adapters/` is broken or for another model: retrain it (page 7) or remove the folder. The agent refuses rather than running without it. |
 | Answers cut off mid-sentence | Raise `max_new_tokens` (400 is a good value) |
 | It invents answers / says it searched when it didn't | Look for `(used …)` lines: only those really ran. Small models do this; ask again naming the tool, `reset` if it keeps copying old answers, or use a bigger model |

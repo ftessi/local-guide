@@ -13,9 +13,9 @@
 
 | Your machine | Path | How fast |
 |---|---|---|
-| Windows or Linux with an **NVIDIA GPU** | [A. NVIDIA](#a-nvidia-gpu-windows-or-linux) | Good: a 1.5B model writes ~19 tokens/s even on a 4 GB card |
-| **Mac** with Apple Silicon (M1–M4) | [B. Mac](#b-mac-apple-silicon) | Works, slowly: the fast Mac backend (MLX) isn't written yet |
-| Any computer **without an NVIDIA GPU** | [C. CPU only](#c-cpu-only) | Works, slowly: ~3 tokens/s, 20–30 s per reply; a fast CPU backend (llama.cpp) isn't written yet |
+| Windows or Linux with an **NVIDIA GPU** | [A. NVIDIA](#a-nvidia-gpu-windows-or-linux) | Good: on a 4 GB card a 1.5B model writes ~19 tokens/s (transformers), a 3B ~28 tokens/s (llama.cpp) |
+| **Mac** with Apple Silicon (M1–M4) | [B. Mac](#b-mac-apple-silicon) | Should be good: llama.cpp runs on the Mac's GPU (not measured yet) |
+| Any computer **without an NVIDIA GPU** | [C. CPU only](#c-cpu-only) | Usable: ~16 tokens/s with a 1.5B model, ~7.5 with a 3B (llama.cpp, a 4-core laptop CPU) |
 
 Not sure? Run `nvidia-smi`. If the command exists, you have an NVIDIA GPU; the top-right corner shows its CUDA
 version.
@@ -93,7 +93,20 @@ touching anything else:
 pip install "torch==2.7.1+cu118" --index-url https://download.pytorch.org/whl/cu118 --force-reinstall --no-deps
 ```
 
-## 5. Check the install
+## 5. Get llama.cpp (Mac and CPU only; optional on NVIDIA)
+
+The `llamacpp` backend runs GGUF models through `llama-server`, a ready-made program from llama.cpp. Download it
+into `LocalAgent/llama.cpp/`:
+
+```bash
+python scripts/get_llamacpp.py
+```
+
+It picks the build for your machine: Metal on a Mac, Vulkan with an NVIDIA GPU, otherwise CPU. Vulkan works with
+the driver you have, even an old one; `--build cuda` needs a driver reporting CUDA 12.4 or newer in `nvidia-smi`.
+Nothing else from NVIDIA is needed: not the CUDA toolkit (and CUDA 13 no longer supports GTX 10-series cards).
+
+## 6. Check the install
 
 ```bash
 python -m pytest              # ~40 s, no model and no GPU needed; everything should pass
@@ -113,19 +126,23 @@ Gemma) need a HuggingFace login first: `huggingface-cli login`.
 | NVIDIA, 6–10 GB | Qwen2.5-3B-Instruct | 4-bit |
 | NVIDIA, 3.5–6 GB (e.g. GTX 1050 4 GB) | Qwen2.5-1.5B-Instruct | fp16 (faster than 3B 4-bit on small cards: page 10) |
 | NVIDIA, under 3.5 GB | Qwen2.5-1.5B-Instruct | 4-bit |
-| Mac, or no NVIDIA GPU | (recommends the future MLX / llama.cpp backends) | see below |
+| Mac, 16 GB or more | Qwen2.5-7B-Instruct, `llamacpp` | q4_k_m |
+| Mac, under 16 GB | Qwen2.5-3B-Instruct, `llamacpp` | q4_k_m |
+| No GPU, 16 GB RAM or more | Qwen2.5-3B-Instruct, `llamacpp` | q4_k_m |
+| No GPU, under 16 GB | Qwen2.5-1.5B-Instruct, `llamacpp` | q4_k_m |
 
-On a Mac or a CPU-only machine the recommended backends don't exist yet, so `new_agent.py` keeps the template's
-model. Change it to something small that works today with the `transformers` backend:
+NVIDIA cards still get the `transformers` backend by default, but `llamacpp` is much faster on small cards: on a
+GTX 1050, Qwen2.5-3B writes ~28 tokens/s instead of 1.5 (page 10), and trained adapters work on both. Switch with:
 
 ```yaml
 # my-agent/agent.yaml
 model:
-  id: Qwen/Qwen2.5-1.5B-Instruct    # Mac with 16 GB: Qwen/Qwen2.5-3B-Instruct also fits
-  backend: transformers
-  quantization: none                # 4-bit (bitsandbytes) needs an NVIDIA GPU
+  id: Qwen/Qwen2.5-3B-Instruct
+  backend: llamacpp
+  quantization: q4_k_m
 ```
 
-Any HuggingFace **chat/instruct** model works (names usually end in `-Instruct` or `-Chat`).
+Any HuggingFace **chat/instruct** model works (names usually end in `-Instruct` or `-Chat`). Models, backends and
+what changes when you switch: page 13.
 
 Next: [3. Create your agent](03-create-your-agent.md)
