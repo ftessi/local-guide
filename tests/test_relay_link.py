@@ -94,6 +94,8 @@ def test_the_link_registers_again_when_its_token_stops_working(relay_server):
         nonce = relay_server.relay.challenge()  # the same agent registers again elsewhere
         relay_server.relay.register(ANA.agent_id, nonce, ANA.sign(register_message(nonce, ANA.agent_id)))
         wait_for(lambda: len(lines) == 2)
+        assert "connected again from somewhere else" in lines[1]
+        wait_for(link.connected.is_set)  # takes the relay back after a pause
         assert post(link.address, b"again") == b"reply to again"
     finally:
         link.stop()
@@ -147,3 +149,94 @@ def test_stop_returns_within_a_poll(relay_server):
     start = time.monotonic()
     link.stop()
     assert time.monotonic() - start < 3
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class BlockingEndpoint(FakeEndpoint):
+    def __init__(self):
+        super().__init__()
+        self.release = threading.Event()
+
+    def handle(self, raw):
+        with self.lock:
+            self.active += 1
+        self.release.wait(10)
+        return b"reply to " + raw
+
+
+def test_a_link_with_every_worker_busy_keeps_polling_so_the_relay_keeps_it():
+    clock = Clock()
+    server = RelayServer(Relay(clock=clock), "127.0.0.1", 0, poll_wait=0.2, deliver_timeout=20, sweep_seconds=3600)
+    server.start()
+    endpoint = BlockingEndpoint()
+    link = link_for(server, endpoint)
+    try:
+        replies = []
+        threads = [threading.Thread(target=lambda i=i: replies.append(post(link.address, b"q%d" % i)))
+                   for i in range(8)]
+        for thread in threads:
+            thread.start()
+        wait_for(lambda: endpoint.active == 8)
+        clock.now += 61  # a minute of slow model calls
+        time.sleep(1)  # a link that still polls has been seen since
+        server.relay.sweep()
+        endpoint.release.set()
+        for thread in threads:
+            thread.join(10)
+        assert sorted(replies) == sorted(b"reply to q%d" % i for i in range(8))
+    finally:
+        link.stop()
+        server.stop()
+
+
+def test_two_copies_of_one_agent_do_not_take_over_from_each_other_in_a_loop(relay_server):
+    lines_a, lines_b = [], []
+    a = link_for(relay_server, FakeEndpoint(), lines_a)
+    b = link_for(relay_server, FakeEndpoint(), lines_b)
+    try:
+        time.sleep(3)
+    finally:
+        a.stop()
+        b.stop()
+    assert len(lines_a) <= 4 and len(lines_b) <= 4, (len(lines_a), len(lines_b))
+
+
+def test_stop_does_not_wait_for_a_long_poll(relay_server):
+    link = RelayLink(FakeEndpoint(), ANA, f"http://127.0.0.1:{relay_server.port}", name="x", poll_wait=10,
+                     say=lambda text: None)
+    relay_server.poll_wait = 10
+    link.start()
+    assert link.connected.wait(5)
+    time.sleep(0.3)  # the poll is now held by the relay
+    start = time.monotonic()
+    link.stop()
+    assert time.monotonic() - start < 2.5
+
+
+def test_the_link_refuses_a_huge_answer_from_the_relay():
+    endpoint, pauses = FakeEndpoint(), []
+    calls = []
+    endpoint.handle = lambda raw: calls.append(raw) or b"r"
+    huge = json.dumps({"request": "0123456789abcdef", "kind": "envelope", "payload": "QUFB" * 2_000_000}).encode()
+    answers = iter([FakeResponse(json.dumps({"nonce": "n"}).encode()),
+                    FakeResponse(json.dumps({"token": "t", "address": "http://r/a/x"}).encode()),
+                    FakeResponse(huge)])
+
+    def opener(request, timeout=None):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise URLError("down") from None
+
+    link = RelayLink(endpoint, ANA, "http://r", name="x", say=lambda text: None, pause=pauses.append, opener=opener)
+    link.start()
+    wait_for(lambda: len(pauses) >= 1)
+    link.stop()
+    assert calls == []

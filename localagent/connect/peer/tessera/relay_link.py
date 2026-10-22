@@ -6,13 +6,18 @@ import json
 import logging
 import re
 import threading
+import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from localagent.protocol.tessera.envelope import MAX_BYTES
 from localagent.protocol.tessera.relay import MAX_WAITING, register_message
 
 log = logging.getLogger(__name__)
 REQUEST_ID = re.compile(r"[0-9a-f]{16}")
+MAX_RESPONSE = MAX_BYTES * 4 // 3 + 4096  # one base64 envelope in JSON; a relay can't make the agent hold more
+REPLACED_SECONDS = 60  # a registration lost sooner than this was taken over by another copy of this agent
+STOP_SECONDS = 2  # stop() doesn't wait for a held poll; the daemon thread ends when it returns
 
 
 class _Unregistered(Exception):
@@ -40,21 +45,33 @@ class RelayLink:
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=self.poll_wait + 5)
+            self._thread.join(timeout=STOP_SECONDS)
             self._thread = None
 
     def _run(self) -> None:
-        token, delay, lost = None, 1.0, False
+        token, delay, lost, replaced, registered_at = None, 1.0, False, 0, 0.0
         while not self._stop.is_set():
             try:
                 if token is None:
                     token = self._register()
+                    registered_at = time.monotonic()
+                    if not replaced:  # announced once, not on every takeover by a twin
+                        self._status("connected", f"Tessera via relay: {self.address}  (agent id {self.identity.agent_id})")
                     lost = False
-                    self._status("connected", f"Tessera via relay: {self.address}  (agent id {self.identity.agent_id})")
+                    self.connected.set()
                 self._poll_and_serve(token)
                 delay = 1.0
             except _Unregistered:
                 token = None
+                if time.monotonic() - registered_at >= REPLACED_SECONDS:
+                    replaced = 0  # the relay forgot us (restarted): register again at once
+                    continue
+                self.connected.clear()
+                if not replaced:
+                    self._status("replaced", "Tessera relay: this agent connected again from somewhere else "
+                                             "(another serve with the same identity?); retrying")
+                self.pause(min(2.0 ** replaced, self.max_backoff))
+                replaced += 1
             except Exception as e:
                 token = None
                 self.connected.clear()
@@ -79,7 +96,10 @@ class RelayLink:
         if token:
             request.add_header("Authorization", f"Bearer {token}")
         with self.opener(request, timeout=timeout) as response:
-            return response.status, response.read()
+            data = response.read(MAX_RESPONSE + 1)
+            if len(data) > MAX_RESPONSE:
+                raise ValueError(f"the relay sent more than {MAX_RESPONSE} bytes")
+            return response.status, data
 
     def _register(self) -> str:
         agent_id = self.identity.agent_id
@@ -93,7 +113,8 @@ class RelayLink:
         return str(data["token"])
 
     def _poll_and_serve(self, token: str) -> None:
-        self._workers.acquire()
+        # Busy with MAX_WAITING requests, poll anyway: a link that stops polling is dropped by the relay.
+        slot = self._workers.acquire(timeout=self.poll_wait)
         try:
             try:
                 status, raw = self._http("GET", f"{self.relay_url}/a/{self.identity.agent_id}/next", token=token,
@@ -102,8 +123,9 @@ class RelayLink:
                 if e.code == 401:
                     raise _Unregistered() from e
                 raise
-            if status == 204:
-                self._workers.release()
+            if status == 204 or self._stop.is_set():
+                if slot:
+                    self._workers.release()
                 return
             job = json.loads(raw)
             request_id, kind = job["request"], job["kind"]
@@ -111,15 +133,17 @@ class RelayLink:
             if not isinstance(request_id, str) or not REQUEST_ID.fullmatch(request_id) or kind not in ("envelope", "card"):
                 raise ValueError("the relay sent a malformed request")
         except BaseException:
-            self._workers.release()
+            if slot:
+                self._workers.release()
             raise
-        threading.Thread(target=self._serve, args=(token, request_id, kind, payload), daemon=True).start()
+        threading.Thread(target=self._serve, args=(token, request_id, kind, payload, slot), daemon=True).start()
 
-    def _serve(self, token: str, request_id: str, kind: str, payload: bytes) -> None:
+    def _serve(self, token: str, request_id: str, kind: str, payload: bytes, slot: bool = True) -> None:
         try:
             reply = self.endpoint.card() if kind == "card" else self.endpoint.handle(payload)
             self._http("POST", f"{self.relay_url}/a/{self.identity.agent_id}/reply/{request_id}", reply, token=token)
         except Exception:
             log.exception("Could not answer a request from the Tessera relay")
         finally:
-            self._workers.release()
+            if slot:
+                self._workers.release()
