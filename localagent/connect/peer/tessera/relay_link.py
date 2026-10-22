@@ -9,7 +9,7 @@ import threading
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from localagent.relay.core import MAX_WAITING, register_message
+from localagent.protocol.tessera.relay import MAX_WAITING, register_message
 
 log = logging.getLogger(__name__)
 REQUEST_ID = re.compile(r"[0-9a-f]{16}")

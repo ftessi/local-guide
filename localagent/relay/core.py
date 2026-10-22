@@ -8,8 +8,8 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from localagent.protocol.identity import verify
+from localagent.protocol.tessera.relay import MAX_WAITING, register_message  # noqa: F401 (part of this module's API)
 
-MAX_WAITING = 8  # unfinished requests per agent
 CHALLENGE_SECONDS = 60
 DROP_SECONDS = 60  # an agent that hasn't polled for this long leaves the relay
 NAME_CHARS, DESCRIPTION_CHARS = 60, 200
@@ -41,11 +41,6 @@ class Refused(RelayError):
 
 class Full(RelayError):
     """The relay already has its maximum number of agents."""
-
-
-def register_message(nonce: str, agent_id: str) -> bytes:
-    """What an agent signs to register: bound to this purpose, this challenge and this agent id."""
-    return f"tessera-relay-register:{nonce}:{agent_id}".encode()
 
 
 def _clean(text, limit: int) -> str:

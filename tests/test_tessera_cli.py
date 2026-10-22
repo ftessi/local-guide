@@ -25,6 +25,14 @@ def test_id(tmp_path, capsys):
     assert capsys.readouterr().out.strip() == (d / "identity/agent.pub").read_text().strip()
 
 
+def test_id_also_shows_the_relay_address(tmp_path, capsys):
+    d = write_agent_yaml(tmp_path / "a", YAML,
+                         installables="connections:\n  tessera:\n    builtin: true\n    relay: https://relay.example.com/\n")
+    agent_id = generate_identity(d / "identity")
+    assert main(["id", "--agent", str(d)]) == 0
+    assert capsys.readouterr().out.splitlines() == [agent_id, f"Through the relay: https://relay.example.com/a/{agent_id}"]
+
+
 def test_peers_accept_reject_remove(tmp_path, capsys):
     d = agent(tmp_path)
     assert main(["peers", "--agent", str(d)]) == 0

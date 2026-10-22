@@ -140,7 +140,7 @@ def check_tessera_folder(config) -> list[str]:
 
 class TesseraConnection(Connection):
     name = "tessera"
-    options = ("builtin", "host", "port")
+    options = ("builtin", "host", "port", "relay", "listed", "description")
 
     def setup(self, ctx) -> None:
         problems = check_tessera_folder(ctx.config)
@@ -161,17 +161,36 @@ class TesseraConnection(Connection):
             raise SetupError(f"No usable identity in {identity_dir} ({e}). Agents created with "
                              "scripts/new_agent.py have one.") from e
         self.endpoint = TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name)
-        host, port = str(ctx.settings.get("host", "127.0.0.1")), int(ctx.settings.get("port", 8100))
-        try:
-            self.server = TesseraServer(self.endpoint, host, port)
-        except OSError as e:
-            raise SetupError(f"Tessera can't listen on {host}:{port} ({e}). Is another agent already using that "
-                             "port? Change `port:` under connections.tessera in installables.yaml.") from e
+        settings = ctx.settings
+        relay, listed, description = settings.get("relay"), settings.get("listed", False), settings.get("description", "")
+        if relay is not None and not (isinstance(relay, str) and relay.startswith(("http://", "https://"))):
+            raise SetupError("connections.tessera.relay must be the relay's address, like https://relay.example.com")
+        if not isinstance(listed, bool) or not isinstance(description, str):
+            raise SetupError("connections.tessera: `listed` must be true or false and `description` a text")
+        self.server = None
+        if not relay or "host" in settings or "port" in settings:  # without a relay: direct, exactly as before
+            host, port = str(settings.get("host", "127.0.0.1")), int(settings.get("port", 8100))
+            try:
+                self.server = TesseraServer(self.endpoint, host, port)
+            except OSError as e:
+                raise SetupError(f"Tessera can't listen on {host}:{port} ({e}). Is another agent already using that "
+                                 "port? Change `port:` under connections.tessera in installables.yaml.") from e
+        self.link = None
+        if relay:
+            from localagent.connect.peer.tessera.relay_link import RelayLink
+            self.link = RelayLink(self.endpoint, identity, relay, name=ctx.config.name, listed=listed,
+                                  description=description, audit=ctx.protocol.audit)
         self.agent_id = identity.agent_id
 
     def start(self) -> None:
-        self.server.start()
-        print(f"Tessera: http://{self.server.host}:{self.server.port}/tessera  (agent id {self.agent_id})")
+        if self.server is not None:
+            self.server.start()
+            print(f"Tessera: http://{self.server.host}:{self.server.port}/tessera  (agent id {self.agent_id})")
+        if self.link is not None:
+            self.link.start()  # prints the relay address once registered
 
     def stop(self) -> None:
-        self.server.stop()
+        if self.link is not None:
+            self.link.stop()
+        if self.server is not None:
+            self.server.stop()
