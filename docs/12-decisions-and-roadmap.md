@@ -15,6 +15,7 @@ step-by-step implementation plans these were taken from are in the git history (
 | 2026-10-11 | Web search made reliable on small models (history curation, automatic page opening, excerpts, chunked prompt reading) |
 | 2026-10-11 | Proof of concept: two secrets trained into per-compartment adapters, and Tessera v0.1 between agents, rehearsed with the real model |
 | 2026-10-13 | llama.cpp backend: 3B model 18× faster on the GTX 1050, CPU 4–5× faster; the same adapters work on both backends |
+| 2026-10-19 | Tessera relay: agents reachable without sharing an address, many at once, opt-in directory |
 
 ## Core decisions
 
@@ -55,6 +56,7 @@ step-by-step implementation plans these were taken from are in the git history (
 | 11 | Peers reach a **separate Tessera-facing agent**, one per connection, ideally on its own machine | Physical isolation on top of the guard: even a break-in through the endpoint finds nothing private. |
 | 12 | Tessera is **independent of its transport**; HTTP for v0.1 | Security comes from the signed envelopes and from what's behind the endpoint, not from the transport. |
 | 13 | The model answering a peer is treated as **controlled by that peer** | Nothing it must not reveal is reachable from its session: no tools, no owner data, no private adapter. |
+| 14 | A **relay carries signed envelopes only**; agents connect out and long-poll it (HTTP, standard library) | The relay can't forge, change or answer anything, so trusting it is limited to availability and privacy (until v0.2's E2E). Long-polling needs no new dependency and passes any proxy that allows HTTPS; a WebSocket binding can replace it later. |
 
 ## Decisions of the llama.cpp backend
 
@@ -100,6 +102,8 @@ or CPU), with adapters converted automatically and switched per request (page 13
 at 28 tokens/s instead of 1.5 (page 10); both trained adapters measured the same as on transformers.
 Tessera-facing agents answer as open assistants, and `chat` has `/talk <name>` for conversations (page 8).
 
+**On branch `tessera-relay`:** a **relay** (`python -m localagent relay`): Tessera-facing agents connect out to it, so they can be reached without sharing an address; several at once, with an opt-in directory (page 8).
+
 **Exists only on the owner's computer:** `tessera-protocol` (the specification, schema and test vectors).
 
 ## Roadmap
@@ -109,8 +113,7 @@ Tessera-facing agents answer as open assistants, and `chat` has `/talk <name>` f
 - **Publish** `tessera-protocol`.
 
 **Then:**
-- A **relay** on our servers: a Tessera-facing agent can be reached either directly or through the relay, which it
-  connects out to, so its owner never shares an address; several agents at once.
+- On top of the relay: a **browser front end** for people without an agent, accounts, rate limits, persistence.
 - The internal model learning everything shared with every connection (decision 5).
 - Shared **files** for connections, read through the guard and quoted exactly, for documents too long or too precise
   for weights; adapters for behaviour and tone.
