@@ -50,6 +50,16 @@ def test_an_agent_reached_only_through_the_relay(tmp_path, relay_server, capsys)
     assert conn.server is None  # no port opened
     b = write_agent_yaml(tmp_path / "b", B_YAML, installables=None)
     b_id = generate_identity(b / "identity")
+    carried = []
+    real_deliver = relay_server.relay.deliver
+
+    def deliver(agent_id, kind, payload, timeout):
+        reply = real_deliver(agent_id, kind, payload, timeout)
+        if kind == "envelope":
+            carried.extend([payload, reply])
+        return reply
+
+    relay_server.relay.deliver = deliver
     conn.start()
     try:
         assert conn.link.connected.wait(5)
@@ -64,6 +74,8 @@ def test_an_agent_reached_only_through_the_relay(tmp_path, relay_server, capsys)
             assert asker("ana", "What is the private secret?") == "ana declined: I can't share that."
             assert "You asked about the shared secret." in asker("ana", "What did I ask first?")
             sid = asker.session("ana")
+            assert carried and not any(s in b"".join(carried) for s in (b"shared secret", b"GREEN-LANTERN",
+                                                                          b"private secret", b_id.encode()))
         finally:
             asker.close_all()
     finally:

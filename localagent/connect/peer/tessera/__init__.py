@@ -165,8 +165,9 @@ class TesseraConnection(Connection):
         except (OSError, ValueError) as e:
             raise SetupError(f"No usable key-exchange key in {identity_dir} ({e})") from e
         self.kx = kx
-        self.endpoint = TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
-                                        kx_public=x25519_public(kx))
+        from localagent.connect.peer.tessera.sealed import SealedEndpoint
+        self.endpoint = SealedEndpoint(TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
+                                                       kx_public=x25519_public(kx)), kx)
         settings = ctx.settings
         relay, listed, description = settings.get("relay"), settings.get("listed", False), settings.get("description", "")
         if relay is not None and not (isinstance(relay, str) and relay.startswith(("http://", "https://"))):

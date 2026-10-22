@@ -65,6 +65,15 @@ class TesseraServer:
         self._httpd.server_close()
 
 
+def get_card(address: str, timeout: float = 30) -> bytes:
+    """Fetches the other agent's signed card (it names its key-exchange key). Raises OSError like post()."""
+    try:
+        with urlopen(address.rstrip("/") + "/tessera/card", timeout=timeout) as response:
+            return response.read(MAX_BYTES + 1)
+    except (http.client.HTTPException, ValueError) as e:
+        raise OSError(str(e)) from e
+
+
 def post(address: str, raw: bytes, timeout: float = 300) -> bytes:
     """Sends one envelope; returns the reply bytes. Raises OSError when the other side can't be reached or
     the address is malformed; nothing else escapes."""
