@@ -8,8 +8,11 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
 from localagent.agent.core import is_refusal
 from localagent.protocol.guard import AuthError
+from localagent.protocol.identity import x25519_public
 from localagent.protocol.prompts import REFUSAL
 from localagent.protocol.tessera.canonical import canonical
 from localagent.protocol.tessera.chain import Chain
@@ -19,7 +22,7 @@ from localagent.protocol.tessera.envelope import (VERSION, EnvelopeError, decode
 log = logging.getLogger(__name__)
 LEVEL_TYPES = {1: frozenset({"ask", "close"})}  # what a requester may send in an open session, per level
 MAX_ANSWER_CHARS = 16_000
-MAX_ANSWER_BYTES = 48_000  # with the envelope around it, an answer stays well under the 64 KiB limit
+MAX_ANSWER_BYTES = 44_000  # with the envelope around it, an answer stays well under the 64 KiB limit
 
 
 def utc_now() -> datetime:
@@ -49,9 +52,10 @@ class _Session:
 
 
 class TesseraEndpoint:
-    def __init__(self, identity, protocol, agent, *, name: str, clock=utc_now, session_seconds: int = 3600,
+    def __init__(self, identity, protocol, agent, *, name: str, kx_public: str, clock=utc_now, session_seconds: int = 3600,
                  max_asks: int = 50, max_ask_chars: int = 1000):
         self.identity, self.protocol, self.agent, self.name, self.clock = identity, protocol, agent, name, clock
+        self.kx_public = kx_public  # the card names it; SealedEndpoint holds the private half
         self.session_seconds, self.max_asks, self.max_ask_chars = session_seconds, max_asks, max_ask_chars
         self._sessions: dict[str, _Session] = {}
         self._lock = threading.Lock()
@@ -60,7 +64,7 @@ class TesseraEndpoint:
         return sign_envelope(self.identity, type=type_, session=session, to=to, seq=seq, prev=prev, body=body,
                              now=self.clock())
 
-    def _error(self, code: str, to: str) -> bytes:
+    def error(self, code: str, to: str = "") -> bytes:
         try:
             self.protocol.audit.log("tessera_error", peer=to, code=code)
         except Exception:
@@ -73,44 +77,50 @@ class TesseraEndpoint:
 
     def card(self) -> bytes:
         return encode(self._sign("card", to="", seq=0, prev="",
-                                 body={"agent_id": self.identity.agent_id, "name": self.name, "versions": [VERSION]}))
+                                 body={"agent_id": self.identity.agent_id, "name": self.name, "versions": [VERSION],
+                                       "kx": self.kx_public}))
 
-    def handle(self, raw: bytes) -> bytes:
+    def handle(self, raw: bytes, *, e: str | None = None, f: str | None = None) -> bytes:
         sender = ""
         try:
             try:
                 env = decode(raw, self.clock())
             except EnvelopeError as e:
-                return self._error(e.code, sender_of(raw))
+                return self.error(e.code, sender_of(raw))
             sender = env["from"]
+            if e is not None and env["type"] != "hello":  # a hello package carries only a hello
+                return self.error("malformed", sender)
             if env["to"] != self.identity.agent_id:
-                return self._error("not_allowed", sender)
+                return self.error("not_allowed", sender)
             if env["type"] == "hello":
-                return self._hello(env)
+                return self._hello(env, e, f)
             with self._lock:
                 session = self._sessions.get(env["session"])
             if session is None or session.peer != sender:
-                return self._error("expired", sender)
+                return self.error("expired", sender)
             with session.lock:
                 return self._in_session(session, env)
         except Exception:
             log.exception("Tessera endpoint failed on an envelope")
-            return self._error("unavailable", sender)
+            return self.error("unavailable", sender)
 
-    def _hello(self, hello: dict) -> bytes:
+    def _hello(self, hello: dict, e: str | None, f: str | None) -> bytes:
         peer, body = hello["from"], hello["body"]
         if hello["session"] or hello["seq"] != 0 or hello["prev"]:
-            return self._error("bad_chain", peer)
+            return self.error("bad_chain", peer)
+        if e is not None and body["e"] != e:  # the signed one-time key must be the one the package used
+            return self.error("malformed", peer)
+        f = f or x25519_public(X25519PrivateKey.generate())
         grant = self.protocol.peer_grant(peer, body["requested_level"])
         if grant is None:
             self.protocol.record_request(peer, body["purpose"], body["requested_level"])
             self.protocol.audit.log("tessera_refused", peer=peer)
-            return encode(self._sign("refuse", to=peer, seq=1, prev=envelope_hash(hello), body={}))
+            return encode(self._sign("refuse", to=peer, seq=1, prev=envelope_hash(hello), body={"f": f}))
         sid = "s-" + secrets.token_hex(8)
         expires = self.clock() + timedelta(seconds=self.session_seconds)
         welcome = self._sign("welcome", to=peer, seq=1, prev=envelope_hash(hello),
                              body={"session": sid, "granted_level": grant.level, "expires": format_time(expires),
-                                   "limits": {"asks": self.max_asks, "ask_chars": self.max_ask_chars}})
+                                   "limits": {"asks": self.max_asks, "ask_chars": self.max_ask_chars}, "f": f})
         # Records first: if either write fails, no session exists and the peer gets `unavailable`.
         self.protocol.record_envelope(peer, sid, hello)
         self.protocol.record_envelope(peer, sid, welcome)
@@ -124,20 +134,20 @@ class TesseraEndpoint:
 
     def _in_session(self, s: _Session, env: dict) -> bytes:
         if s.closed or self.clock() >= s.expires:
-            return self._error("expired", s.peer)
+            return self.error("expired", s.peer)
         try:
             s.chain.check_next(env)
         except EnvelopeError as e:
-            return self._error(e.code, s.peer)
+            return self.error(e.code, s.peer)
         if env["type"] not in LEVEL_TYPES[s.level]:
-            return self._error("not_allowed", s.peer)
+            return self.error("not_allowed", s.peer)
         try:
             return self._turn(s, env)
         except Exception:
             # Something after the record may have been written but not the other half: this session can't go on.
             log.exception("Tessera session %s failed", s.id)
             s.closed = True
-            return self._error("unavailable", s.peer)
+            return self.error("unavailable", s.peer)
 
     def _turn(self, s: _Session, env: dict) -> bytes:
         if env["type"] == "close":
@@ -148,12 +158,12 @@ class TesseraEndpoint:
             return b""
         text = env["body"]["text"]
         if s.asks_left <= 0 or len(text) > self.max_ask_chars:
-            return self._error("limit", s.peer)
+            return self.error("limit", s.peer)
         try:
             peer_session = self.protocol.open_peer_session(s.peer)  # re-checked every time: removal applies at once
         except AuthError:
             s.closed = True
-            return self._error("not_allowed", s.peer)
+            return self.error("not_allowed", s.peer)
         self.protocol.record_envelope(s.peer, s.id, env)  # record first, then memory
         s.chain.append(env)
         s.asks_left -= 1

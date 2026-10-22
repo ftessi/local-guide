@@ -7,7 +7,7 @@ import pytest
 from localagent.agent.core import Agent
 from localagent.connect.peer.tessera.endpoint import TesseraEndpoint
 from localagent.protocol.guard import Protocol
-from localagent.protocol.identity import identity_from_seed
+from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera.chain import Chain, verify_record
 from localagent.protocol.tessera.envelope import decode, encode, sign_envelope
 from localagent.testing import FakeBackend
@@ -16,6 +16,8 @@ A = identity_from_seed(bytes(range(32)))
 B = identity_from_seed(bytes(range(32, 64)))
 C = identity_from_seed(bytes(range(64, 96)))
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+KX = x25519_public(x25519_from_seed(bytes(range(96, 128))))
+EKEY = x25519_public(x25519_from_seed(bytes(range(128, 160))))
 
 
 class Clock:
@@ -34,7 +36,7 @@ def side(tmp_path):
     protocol = Protocol.for_agent(tmp_path, ["demo"], tools={}, owner_secret="t")
     backend = FakeBackend()
     clock = Clock()
-    endpoint = TesseraEndpoint(A, protocol, Agent(backend, {}, model_id="org/model"), name="Ana's agent",
+    endpoint = TesseraEndpoint(A, protocol, Agent(backend, {}, model_id="org/model"), name="Ana's agent", kx_public=KX,
                                clock=clock, max_asks=2, max_ask_chars=50)
     return SimpleNamespace(dir=tmp_path, protocol=protocol, backend=backend, clock=clock, endpoint=endpoint)
 
@@ -46,7 +48,7 @@ def send(side, env):
 
 def hello(who=B, level=1):
     return sign_envelope(who, type="hello", session="", to=A.agent_id, seq=0, prev="",
-                         body={"purpose": "Review contract v3", "requested_level": level, "nonce": "n1"}, now=NOW)
+                         body={"purpose": "Review contract v3", "requested_level": level, "nonce": "n1", "e": EKEY}, now=NOW)
 
 
 def open_session(side):
@@ -67,7 +69,7 @@ def next_env(chain, type_, body, who=B, session=None, now=NOW):
 
 def test_stranger_is_refused_and_recorded_for_the_owner(side):
     reply = send(side, hello())
-    assert reply["type"] == "refuse" and reply["body"] == {} and reply["seq"] == 1
+    assert reply["type"] == "refuse" and set(reply["body"]) == {"f"} and reply["seq"] == 1
     assert [r["id"] for r in side.protocol.requests()] == [B.agent_id]
 
 
@@ -76,7 +78,7 @@ def test_refusals_look_the_same_for_unknown_pending_and_rejected(side):
     pending = send(side, hello(B))
     side.protocol.reject_request(B.agent_id)
     rejected = send(side, hello(B))
-    assert {json.dumps(r["body"]) for r in (unknown, pending, rejected)} == {"{}"}
+    assert {tuple(r["body"]) for r in (unknown, pending, rejected)} == {("f",)}  # only the one-time key
     assert {r["type"] for r in (unknown, pending, rejected)} == {"refuse"}
 
 
@@ -179,21 +181,21 @@ def test_card_reveals_nothing_about_connections(side):
     open_session(side)
     card = decode(side.endpoint.card(), NOW)
     assert card["type"] == "card" and card["body"] == {"agent_id": A.agent_id, "name": "Ana's agent",
-                                                       "versions": ["0.1"]}
+                                                       "versions": ["0.2"], "kx": KX}
     assert "demo" not in json.dumps(card) and B.agent_id not in json.dumps(card)
 
 
 def test_undecodable_bytes_get_an_error_addressed_to_nobody(side):
     assert decode(side.endpoint.handle(b"not json"), NOW)["body"]["code"] == "malformed"
     assert decode(side.endpoint.handle(b"not json"), NOW)["to"] == ""
-    oversized = b"{" + b" " * 65535 + b"}"  # 65537 bytes
+    oversized = b"{" + b" " * (46 * 1024) + b"}"  # over INNER_MAX
     err = decode(side.endpoint.handle(oversized), NOW)
     assert err["body"]["code"] == "too_large" and err["to"] == ""
 
 
 def test_a_hello_must_start_at_seq_zero(side):
     h = sign_envelope(B, type="hello", session="", to=A.agent_id, seq=1, prev="",
-                      body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1"}, now=NOW)
+                      body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1", "e": EKEY}, now=NOW)
     assert send(side, h)["body"]["code"] == "bad_chain"
 
 
@@ -238,3 +240,21 @@ def test_a_failed_hello_record_opens_no_session(side, monkeypatch):
         ask = sign_envelope(B, type="ask", session=session, to=A.agent_id, seq=2, prev="",
                             body={"text": "Q?"}, now=NOW)
         assert send(side, ask)["body"]["code"] == "expired"
+
+
+def test_welcome_and_refuse_carry_the_one_time_key_they_were_given(side):
+    refuse = decode(side.endpoint.handle(encode(hello()), e=EKEY, f=KX), side.clock())
+    assert refuse["type"] == "refuse" and refuse["body"] == {"f": KX}
+    side.protocol.accept_peer(B.agent_id, name="Bob")
+    welcome = decode(side.endpoint.handle(encode(hello()), e=EKEY, f=KX), side.clock())
+    assert welcome["type"] == "welcome" and welcome["body"]["f"] == KX
+
+
+def test_a_hello_whose_one_time_key_differs_from_the_package_is_refused(side):
+    side.protocol.accept_peer(B.agent_id, name="Bob")
+    reply = decode(side.endpoint.handle(encode(hello()), e=KX, f=KX), side.clock())
+    assert reply["type"] == "error" and reply["body"]["code"] == "malformed"
+    w, chain = open_session(side)
+    ask = next_env(chain, "ask", {"text": "q"})
+    reply = decode(side.endpoint.handle(encode(ask), e=EKEY, f=KX), side.clock())
+    assert reply["type"] == "error" and reply["body"]["code"] == "malformed"  # a hello package carries only a hello

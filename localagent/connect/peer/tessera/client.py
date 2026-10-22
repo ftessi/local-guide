@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from http.client import HTTPException
 
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
 from localagent.connect.peer.tessera.endpoint import utc_now
 from localagent.connect.peer.tessera.http import post as http_post
+from localagent.protocol.identity import x25519_public
 from localagent.protocol.tessera.chain import Chain
 from localagent.protocol.tessera.envelope import EnvelopeError, decode, encode, parse_time, sign_envelope
 
@@ -23,9 +26,11 @@ class Reply:
 
 class TesseraClient:
     def __init__(self, identity, protocol, *, remote_id: str, address: str, purpose: str, post=http_post,
-                 clock=utc_now):
+                 clock=utc_now, new_key=X25519PrivateKey.generate):
         self.identity, self.protocol, self.remote_id = identity, protocol, remote_id
         self.address, self.purpose, self._post, self._clock = address, purpose, post, clock
+        self._new_key = new_key
+        self._e = None  # the one-time key of the last hello
         self._sid: str | None = None
         self._chain = Chain()
         self._expires: datetime | None = None
@@ -48,7 +53,9 @@ class TesseraClient:
         return reply
 
     def _connect(self) -> bool:
-        hello = self._sign("hello", {"purpose": self.purpose, "requested_level": REQUESTED_LEVEL, "nonce": secrets.token_hex(16)},
+        self._e = self._new_key()
+        hello = self._sign("hello", {"purpose": self.purpose, "requested_level": REQUESTED_LEVEL,
+                                     "nonce": secrets.token_hex(16), "e": x25519_public(self._e)},
                            session="", seq=0, prev="")
         try:
             reply = self._send(hello)

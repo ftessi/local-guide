@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from localagent.protocol.identity import identity_from_seed
+from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera.canonical import canonical
 from localagent.protocol.tessera.chain import Chain, verify_record
 from localagent.protocol.tessera.envelope import (MAX_BYTES, EnvelopeError, decode, encode, envelope_hash,
@@ -12,11 +12,12 @@ from localagent.protocol.tessera.envelope import (MAX_BYTES, EnvelopeError, deco
 A = identity_from_seed(bytes(range(32)))
 B = identity_from_seed(bytes(range(32, 64)))
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+KEY = x25519_public(x25519_from_seed(bytes(range(128, 160))))
 
 
 def hello(**over):
     fields = dict(type="hello", session="", to=A.agent_id, seq=0, prev="",
-                  body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1"}, now=NOW)
+                  body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1", "e": KEY}, now=NOW)
     fields.update(over)
     return sign_envelope(B, **fields)
 
@@ -42,7 +43,7 @@ def test_round_trip():
 
 def test_signature_covers_everything():
     env = hello()
-    for field, value in [("body", {"purpose": "x", "requested_level": 1, "nonce": "n1"}), ("seq", 1),
+    for field, value in [("body", {"purpose": "x", "requested_level": 1, "nonce": "n1", "e": KEY}), ("seq", 1),
                          ("to", B.agent_id), ("from", A.agent_id)]:
         assert code_of(encode({**env, field: value})) == "bad_signature"
 
@@ -53,7 +54,7 @@ def test_time_window():
 
 
 def test_size_limit():
-    big = hello(body={"purpose": "x", "requested_level": 1, "nonce": "n"})
+    big = hello(body={"purpose": "x", "requested_level": 1, "nonce": "n", "e": KEY})
     raw = encode(big) + b" " * MAX_BYTES
     assert code_of(raw) == "too_large"
 
@@ -83,17 +84,17 @@ def test_malformed(mutate):
 
 
 def test_bodies_per_type():
-    ok = [("refuse", {}), ("ask", {"text": "Q?"}), ("answer", {"text": "A.", "binding": False}),
+    ok = [("refuse", {"f": KEY}), ("ask", {"text": "Q?"}), ("answer", {"text": "A.", "binding": False}),
           ("decline", {}), ("close", {}), ("error", {"code": "limit"}),
-          ("card", {"agent_id": A.agent_id, "name": "A", "versions": ["0.1"]}),
+          ("card", {"agent_id": A.agent_id, "name": "A", "versions": ["0.2"], "kx": KEY}),
           ("welcome", {"session": "s-1", "granted_level": 1, "expires": "2026-10-11T13:00:00Z",
-                       "limits": {"asks": 50, "ask_chars": 1000}})]
+                       "limits": {"asks": 50, "ask_chars": 1000}, "f": KEY})]
     for type_, body in ok:
         env = sign_envelope(A, type=type_, session="", to=B.agent_id, seq=1, prev="", body=body, now=NOW)
         assert decode(encode(env), NOW)["type"] == type_
     bad = [("answer", {"text": "A.", "binding": True}), ("error", {"code": "oops"}),
            ("welcome", {"session": "s-1", "granted_level": 1, "expires": "2026-10-11T13:00:00Z",
-                        "limits": {"asks": 50}})]
+                        "limits": {"asks": 50}, "f": KEY})]
     for type_, body in bad:
         env = sign_envelope(A, type=type_, session="", to=B.agent_id, seq=1, prev="", body=body, now=NOW)
         assert code_of(encode(env)) == "malformed"
@@ -105,7 +106,7 @@ def test_hash_includes_the_signature_and_changes_with_anything():
     other = "B" if env["sig"][-1] == "A" else "A"
     assert envelope_hash(env) != envelope_hash({**env, "sig": env["sig"][:-1] + other})
     assert envelope_hash(env) != envelope_hash(hello(body={"purpose": "Other", "requested_level": 1,
-                                                           "nonce": "n1"}))
+                                                           "nonce": "n1", "e": KEY}))
 
 
 def test_sender_of_is_best_effort():
@@ -114,8 +115,8 @@ def test_sender_of_is_best_effort():
 
 
 def test_deep_nesting_is_malformed_not_a_crash():
-    raw = b"[" * 60000
-    assert len(raw) < MAX_BYTES
+    raw = b"[" * 45000
+    assert len(raw) < 46 * 1024
     assert code_of(raw) == "malformed"
     assert sender_of(raw) == ""
     assert sender_of(b'{"from": ' + b"[" * 60000) == ""
@@ -130,12 +131,12 @@ def test_parse_time_accepts_only_the_canonical_spelling():
 
 
 def test_welcome_expires_and_card_agent_id_are_checked():
-    welcome = dict(session="s-1", granted_level=1, limits={"asks": 50, "ask_chars": 1000})
+    welcome = dict(session="s-1", granted_level=1, limits={"asks": 50, "ask_chars": 1000}, f=KEY)
     env = sign_envelope(A, type="welcome", session="", to=B.agent_id, seq=1, prev="",
                         body={**welcome, "expires": "yesterday"}, now=NOW)
     assert code_of(encode(env)) == "malformed"
     env = sign_envelope(A, type="card", session="", to=B.agent_id, seq=1, prev="",
-                        body={"agent_id": "someone", "name": "A", "versions": ["0.1"]}, now=NOW)
+                        body={"agent_id": "someone", "name": "A", "versions": ["0.2"], "kx": KEY}, now=NOW)
     assert code_of(encode(env)) == "malformed"
 
 
@@ -152,7 +153,7 @@ def test_chain():
     h = hello()
     w = sign_envelope(A, type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(h),
                       body={"session": "s-1", "granted_level": 1, "expires": "2026-10-11T13:00:00Z",
-                            "limits": {"asks": 50, "ask_chars": 1000}}, now=NOW)
+                            "limits": {"asks": 50, "ask_chars": 1000}, "f": KEY}, now=NOW)
     chain = Chain()
     chain.append(h)
     chain.append(w)
@@ -169,3 +170,23 @@ def test_chain():
     tampered = [h, {**w, "body": {**w["body"], "granted_level": 2}}]
     with pytest.raises(EnvelopeError):
         verify_record(tampered)
+
+
+def test_v01_envelopes_are_refused_on_the_wire_but_old_records_still_verify():
+    old = {k: v for k, v in hello().items() if k != "sig"}
+    old["tessera"] = "0.1"
+    old["body"] = {k: v for k, v in old["body"].items() if k != "e"}
+    old["sig"] = B.sign(canonical(old))
+    assert code_of(encode(old)) == "malformed"
+    verify_record([old])
+
+
+def test_one_time_keys_must_look_like_keys():
+    assert code_of(encode(hello(body={"purpose": "x", "requested_level": 1, "nonce": "n", "e": "short"}))) == "malformed"
+
+
+def test_inner_messages_are_capped_below_the_package_limit():
+    from localagent.protocol.tessera.envelope import INNER_MAX
+    big = hello(body={"purpose": "x", "requested_level": 1, "nonce": "n", "e": KEY})
+    raw = encode(big)
+    assert code_of(raw + b" " * (INNER_MAX - len(raw) + 1)) == "too_large"

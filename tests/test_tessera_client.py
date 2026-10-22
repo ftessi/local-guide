@@ -8,13 +8,14 @@ from localagent.connect.peer.tessera.endpoint import TesseraEndpoint, utc_now
 from localagent.connect.peer.tessera.http import TesseraServer
 from localagent.connect.peer.tessera.http import post as http_post
 from localagent.protocol.guard import Protocol
-from localagent.protocol.identity import identity_from_seed
+from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera.chain import verify_record
 from localagent.protocol.tessera.envelope import encode
 from localagent.testing import FakeBackend
 
 A = identity_from_seed(bytes(range(32)))
 B = identity_from_seed(bytes(range(32, 64)))
+KX = x25519_from_seed(bytes(range(96, 128)))
 
 
 def a_side(tmp_path, replies):
@@ -24,7 +25,7 @@ def a_side(tmp_path, replies):
     (path / "adapter.json").write_text(json.dumps({"compartment": "demo", "base_model": "org/model"}))
     protocol = Protocol.for_agent(d, ["demo"], tools={}, owner_secret="t")
     endpoint = TesseraEndpoint(A, protocol, Agent(FakeBackend(replies=replies), {}, model_id="org/model"),
-                               name="Ana's agent")
+                               name="Ana's agent", kx_public=x25519_public(KX))
     return protocol, endpoint
 
 
@@ -214,7 +215,8 @@ def signed_by_c(type_, body, session="s-1", seq=1):
 
 def test_a_validly_signed_reply_from_a_third_identity_is_not_connected(tmp_path):
     welcome = signed_by_c("welcome", {"session": "s-1", "granted_level": 1, "expires": "2999-01-01T00:00:00Z",
-                                      "limits": {"asks": 5, "ask_chars": 100}})
+                                      "limits": {"asks": 5, "ask_chars": 100},
+                                      "f": x25519_public(KX)})
     c = client(b_protocol(tmp_path), None, post=lambda address, raw: welcome)
     assert c.ask("Q?") == Reply("not_connected")
 

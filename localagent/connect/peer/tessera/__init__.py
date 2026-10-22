@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from localagent.connect.base import Connection, SetupError
-from localagent.protocol.identity import load_identity
+from localagent.protocol.identity import load_identity, load_kx, x25519_public
 from localagent.protocol.scopes import INTERNAL_COMPARTMENT as INTERNAL
 from localagent.protocol.session import model_slug
 
@@ -160,7 +160,13 @@ class TesseraConnection(Connection):
         except (OSError, ValueError) as e:
             raise SetupError(f"No usable identity in {identity_dir} ({e}). Agents created with "
                              "scripts/new_agent.py have one.") from e
-        self.endpoint = TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name)
+        try:
+            kx = load_kx(identity_dir)
+        except (OSError, ValueError) as e:
+            raise SetupError(f"No usable key-exchange key in {identity_dir} ({e})") from e
+        self.kx = kx
+        self.endpoint = TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
+                                        kx_public=x25519_public(kx))
         settings = ctx.settings
         relay, listed, description = settings.get("relay"), settings.get("listed", False), settings.get("description", "")
         if relay is not None and not (isinstance(relay, str) and relay.startswith(("http://", "https://"))):
