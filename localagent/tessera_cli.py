@@ -1,4 +1,5 @@
 """Tessera commands: id, peers, connect, ask. Outside the layers: reads the agent's config and files."""
+import json
 import re
 import sys
 import unicodedata
@@ -12,6 +13,8 @@ from localagent.connect.peer.tessera.client import Reply, TesseraClient
 from localagent.protocol.guard import Protocol
 from localagent.protocol.identity import AGENT_ID_RE, load_agent_id, load_identity
 from localagent.protocol.policy import PolicyError
+from localagent.protocol.tessera.chain import verify_record
+from localagent.protocol.tessera.envelope import EnvelopeError
 from localagent.protocol.prompts import REFUSAL
 
 REMOTE_NAME = re.compile(r"[a-z][a-z0-9_-]*")
@@ -219,6 +222,47 @@ def _ask(config, rest: list[str], log) -> int:
     return 0 if answer.reply.kind in ("answer", "decline") else 1
 
 
+def _records(config, rest: list[str], args, log) -> int:
+    p = protocol_for(config)
+    names = p.record_names()
+    if not rest or rest == ["list"]:
+        log("Sessions (newest last):")
+        for name in names:
+            other, sid = name.split("/")
+            record = p.read_record(other, sid)
+            log(f"  {sid}  with {other}  {record[0]['time'] if record else '?'}  {len(record)} messages")
+        if not names:
+            log("  (none)")
+        return 0
+    if len(rest) != 2 or rest[0] not in ("show", "verify", "export"):
+        raise ConfigError("Use: records | records show <session> | records verify <session> | "
+                          "records export <session> --to <file>")
+    found = [n for n in names if n.split("/")[1] == rest[1]]
+    if len(found) != 1:
+        raise ConfigError(f"No session '{rest[1]}' in this agent's records (see: python -m localagent records)")
+    other, sid = found[0].split("/")
+    record = p.read_record(other, sid)
+    if rest[0] == "show":
+        for env in record:
+            who = "them" if env["from"] == other else "us"
+            text = env["body"].get("text") or env["body"].get("code") or ""
+            log(f"{env['time']}  {who:<4} {env['type']}: {_safe(text)}")
+        return 0
+    if rest[0] == "verify":
+        try:
+            verify_record(record)
+        except EnvelopeError as e:
+            log(f"FAILED: {e}")
+            return 1
+        log(f"OK: {len(record)} messages; signatures and chain verified.")
+        return 0
+    if not args.to:
+        raise ConfigError("records export needs --to <file>")
+    Path(args.to).write_text("".join(json.dumps(env, ensure_ascii=False) + "\n" for env in record), encoding="utf-8")
+    log(f"Exported {len(record)} messages to {args.to} (decrypted: keep the file private).")
+    return 0
+
+
 def run(command: str, config, args, log=print) -> int:
     try:
         if command == "id":
@@ -235,6 +279,8 @@ def run(command: str, config, args, log=print) -> int:
             return _peers(config, args.rest, args, log)
         if command == "connect":
             return _connect(config, args.rest, args, log)
+        if command == "records":
+            return _records(config, args.rest, args, log)
         return _ask(config, args.rest, log)
     except (ConfigError, PolicyError, ValueError, OSError) as e:
         print(f"Error: {e}", file=sys.stderr)

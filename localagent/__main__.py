@@ -20,6 +20,8 @@ COMMANDS = {
     "peers": "list accepted agents and connection requests; peers accept|reject|remove <id>",
     "connect": 'save another agent to ask: connect <address> <their id> --name <name> --purpose "<why>"',
     "ask": 'ask a connected agent one question over Tessera: ask <name> "<question>"',
+    "records": "show this agent's Tessera records, decrypted: records | records show|verify <session> | "
+               "records export <session> --to <file>",
     "relay": "run a Tessera relay that agents connect out to (--host, --port, --max-agents, --public-url)",
 }
 
@@ -57,7 +59,7 @@ def main(argv=None) -> int:
         if args.command in ("examples", "train", "export"):
             from localagent import train_cli
             return train_cli.run(args.command, config, args)
-        if args.command in ("id", "peers", "connect", "ask"):
+        if args.command in ("id", "peers", "connect", "ask", "records"):
             from localagent import tessera_cli
             return tessera_cli.run(args.command, config, args)
         if args.command in ("install", "list"):

@@ -4,10 +4,11 @@ from datetime import datetime
 from pathlib import Path
 
 from localagent.protocol.audit import Audit
-from localagent.protocol.identity import AGENT_ID_RE
+from localagent.protocol.identity import AGENT_ID_RE, load_record_key
 from localagent.protocol.policy import PeerEntry, Policy, PolicyError, load_policy, make_peer_entry, save_policy
 from localagent.protocol.scopes import INTERNAL_COMPARTMENT, Scope
 from localagent.protocol.session import Session, model_slug
+from localagent.protocol.tessera.records import is_sealed, open_line, seal_line
 from localagent.vault.store import Vault
 
 OWNER_MEMORY = INTERNAL_COMPARTMENT
@@ -19,7 +20,8 @@ class AuthError(PermissionError):
 
 class Protocol:
     def __init__(self, *, vault: Vault, policy: Policy, audit: Audit, tools: dict,
-                 adapters_dir: Path, owner_secret: str, policy_path: Path | None = None):
+                 adapters_dir: Path, owner_secret: str, policy_path: Path | None = None,
+                 identity_dir: Path | None = None):
         self.vault = vault
         self.policy = policy
         self.audit = audit
@@ -27,16 +29,20 @@ class Protocol:
         self.adapters_dir = Path(adapters_dir)
         self._owner_secret = owner_secret or ""
         self.policy_path = Path(policy_path) if policy_path else None
+        self.identity_dir = Path(identity_dir) if identity_dir else None
+        self._record_key = None  # loaded when a record is first read or written
         self._policy_stamp = self._stamp()
         self._invalid_stamp = None  # the last broken policy.yaml we audited, so it is audited once
 
     @classmethod
     def for_agent(cls, agent_dir: Path, compartments: list[str], tools: dict, owner_secret: str) -> "Protocol":
         agent_dir = Path(agent_dir)
-        return cls(vault=Vault(agent_dir, compartments), policy=load_policy(agent_dir / "policy.yaml"),
-                   audit=Audit(agent_dir / "audit.log"), tools=tools,
-                   adapters_dir=agent_dir / "training" / "adapters", owner_secret=owner_secret,
-                   policy_path=agent_dir / "policy.yaml")
+        protocol = cls(vault=Vault(agent_dir, compartments), policy=load_policy(agent_dir / "policy.yaml"),
+                       audit=Audit(agent_dir / "audit.log"), tools=tools,
+                       adapters_dir=agent_dir / "training" / "adapters", owner_secret=owner_secret,
+                       policy_path=agent_dir / "policy.yaml", identity_dir=agent_dir / "identity")
+        protocol.seal_plain_records()
+        return protocol
 
     def _session(self, principal: str, scope, memory_compartment: str) -> Session:
         return Session(principal=principal, scope=scope, memory_compartment=memory_compartment,
@@ -114,7 +120,7 @@ class Protocol:
 
     def _latest_requests(self) -> dict:
         latest = {}
-        for record in self.vault.read_tessera("requests"):
+        for record in self._read("requests"):
             latest[record.get("id")] = record
         return latest
 
@@ -124,7 +130,7 @@ class Protocol:
             return
         if self._current_policy().peer(agent_id) is not None or agent_id in self._latest_requests():
             return
-        self.vault.append_tessera("requests", {"id": agent_id, "purpose": str(purpose)[:200], "level": level,
+        self._append("requests", {"id": agent_id, "purpose": str(purpose)[:200], "level": level,
                                                "status": "pending",
                                                "time": datetime.now().isoformat(timespec="seconds")})
         self.audit.log("tessera_request", peer=agent_id, level=level)
@@ -138,7 +144,7 @@ class Protocol:
         """Appends the id's latest state with a new status; an id never requested gets a bare record, so it
         can't queue itself later."""
         base = self._latest_requests().get(agent_id, {"id": agent_id})
-        self.vault.append_tessera("requests", {**base, "status": status,
+        self._append("requests", {**base, "status": status,
                                                "time": datetime.now().isoformat(timespec="seconds")})
 
     def _save(self, peers: dict) -> None:
@@ -169,10 +175,38 @@ class Protocol:
         self.audit.log("tessera_peer_removed", peer=agent_id)
 
     def record_envelope(self, other_id: str, session_id: str, envelope: dict) -> None:
-        self.vault.append_tessera(f"{other_id}/{session_id}", envelope)
+        self._append(f"{other_id}/{session_id}", envelope)
 
     def read_record(self, other_id: str, session_id: str) -> list[dict]:
-        return self.vault.read_tessera(f"{other_id}/{session_id}")
+        return self._read(f"{other_id}/{session_id}")
+
+    def _key(self) -> bytes:
+        if self._record_key is None:
+            if self.identity_dir is None:
+                raise ValueError("This agent has no identity folder, so it can't keep Tessera records")
+            self._record_key = load_record_key(self.identity_dir)
+        return self._record_key
+
+    def _append(self, name: str, record: dict) -> None:
+        self.vault.append_tessera(name, seal_line(self._key(), name, record))
+
+    def _read(self, name: str) -> list[dict]:
+        lines = self.vault.read_tessera(name)
+        return [open_line(self._key(), name, line) for line in lines] if lines else []
+
+    def record_names(self) -> list[str]:
+        return [n for n in self.vault.tessera_names() if "/" in n]
+
+    def seal_plain_records(self) -> int:
+        """Records written before v0.2 are encrypted in place, once. Returns how many files changed."""
+        changed = 0
+        for name in self.vault.tessera_names():
+            lines = self.vault.read_tessera(name)
+            if lines and not all(is_sealed(line) for line in lines):
+                self.vault.rewrite_tessera(name, [line if is_sealed(line) else seal_line(self._key(), name, line)
+                                                  for line in lines])
+                changed += 1
+        return changed
 
     def training_set(self, compartment: str) -> list[dict]:
         """Only examples labeled exactly `compartment`. Peer data is never included."""

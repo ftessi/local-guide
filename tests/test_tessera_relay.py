@@ -12,7 +12,7 @@ from localagent.protocol.identity import generate_identity, identity_from_seed
 from localagent.protocol.tessera.chain import verify_record
 from localagent.relay.core import Relay
 from localagent.relay.http import RelayServer
-from localagent.tessera_cli import make_asker
+from localagent.tessera_cli import make_asker, protocol_for
 from localagent.testing import FakeBackend
 from tests.fakes import write_agent_yaml
 
@@ -81,10 +81,8 @@ def test_an_agent_reached_only_through_the_relay(tmp_path, relay_server, capsys)
     finally:
         conn.stop()
     assert "What is the shared secret?" in json.dumps(backend.calls[-1])  # the follow-up saw the earlier turn
-    b_record = [json.loads(line) for line in
-                (b / "tessera" / facing_id / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()]
-    a_record = [json.loads(line) for line in
-                (facing / "tessera" / b_id / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()]
+    b_record = protocol_for(load_config(b)).read_record(facing_id, sid)
+    a_record = protocol_for(load_config(facing)).read_record(b_id, sid)
     assert a_record == b_record and len(a_record) == 9  # hello, welcome, 3 x (ask, reply), close
     verify_record(a_record)
 

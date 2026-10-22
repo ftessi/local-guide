@@ -61,9 +61,10 @@ def test_three_folders(tmp_path, capsys):
     b_files = list((b / "tessera" / facing_id).glob("*.jsonl"))
     assert len(b_files) == 1
     sid = b_files[-1].stem
-    b_record = [json.loads(line) for line in b_files[-1].read_text(encoding="utf-8").splitlines()]
-    a_record = [json.loads(line) for line in
-                (facing / "tessera" / b_id / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()]
+    from localagent.tessera_cli import protocol_for
+    assert b"GREEN-LANTERN" not in b_files[-1].read_bytes()  # encrypted on disk
+    b_record = protocol_for(load_config(b)).read_record(facing_id, sid)
+    a_record = protocol_for(load_config(facing)).read_record(b_id, sid)
     # hello, welcome, ask, answer, close (one-shot ask closes its session)
     assert a_record == b_record and len(a_record) == 5
     verify_record(a_record)
