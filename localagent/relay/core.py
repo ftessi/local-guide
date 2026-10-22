@@ -70,11 +70,20 @@ class _Agent:
 
 
 class Relay:
-    def __init__(self, *, max_agents: int = 100, max_challenges: int = 10_000, clock=time.monotonic):
+    def __init__(self, *, max_agents: int = 100, max_challenges: int = 10_000, clock=time.monotonic,
+                 on_event=None):
         self.max_agents, self.max_challenges, self.clock = max_agents, max_challenges, clock
+        self.on_event = on_event  # metadata only: ("register" | "drop", agent=...), for the relay's log
         self._agents: dict[str, _Agent] = {}
         self._challenges: dict[str, float] = {}  # nonce -> expiry
         self._cond = threading.Condition()
+
+    def _event(self, event: str, **fields) -> None:
+        if self.on_event is not None:
+            try:
+                self.on_event(event, **fields)
+            except Exception:
+                pass  # the log must never stop the relay
 
     def challenge(self) -> str:
         with self._cond:
@@ -101,6 +110,7 @@ class Relay:
             self._agents[agent_id] = _Agent(token, bool(listed), _clean(name, NAME_CHARS),
                                             _clean(description, DESCRIPTION_CHARS), self.clock())
             self._cond.notify_all()
+            self._event("register", agent=agent_id)
             return token
 
     def deliver(self, agent_id: str, kind: str, payload: bytes, timeout: float) -> bytes:
@@ -175,6 +185,7 @@ class Relay:
             if not agent.polls and now - agent.last_seen > DROP_SECONDS:
                 del self._agents[agent_id]
                 self._fail(agent)
+                self._event("drop", agent=agent_id)
 
     def _fail(self, agent: _Agent) -> None:
         for request in agent.open.values():

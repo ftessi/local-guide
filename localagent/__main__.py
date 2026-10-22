@@ -53,6 +53,9 @@ def main(argv=None) -> int:
     parser.add_argument("--host", default="127.0.0.1", help="relay: address to listen on (0.0.0.0 = every network)")
     parser.add_argument("--port", type=int, default=8200, help="relay: port to listen on")
     parser.add_argument("--max-agents", type=int, default=100, help="relay: most agents connected at once")
+    parser.add_argument("--data-dir", default="relay-data", help="relay: where its connection log and inbox live")
+    parser.add_argument("--log-days", type=int, default=90, help="relay: days the connection log keeps")
+    parser.add_argument("--inbox-mb", type=int, default=1024, help="relay: most megabytes of inspection uploads")
     parser.add_argument("--public-url", help="relay: the address agents and askers use, e.g. https://relay.example.com")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -64,7 +67,8 @@ def main(argv=None) -> int:
         return inspect_file(args.rest[0], args.key, args.delete)
     if args.command == "relay":
         from localagent.relay.http import run_relay
-        return run_relay(args.host, args.port, args.max_agents, args.public_url)
+        return run_relay(args.host, args.port, args.max_agents, args.public_url, args.data_dir, args.log_days,
+                         args.inbox_mb)
 
     try:
         config = load_config(resolve_agent_dir(args.agent))
