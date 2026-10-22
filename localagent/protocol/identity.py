@@ -1,10 +1,13 @@
-"""Agent identity: an Ed25519 keypair. The public key (base64url) is the agent id."""
+"""Agent identity: an Ed25519 keypair. The public key (base64url) is the agent id. Beside it: an X25519 key for
+Tessera's key exchange and a key for records at rest."""
 import base64
 import re
+import secrets
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.serialization import (Encoding, NoEncryption, PrivateFormat, PublicFormat,
                                                           load_pem_private_key)
 
@@ -31,6 +34,54 @@ def _agent_id(key: Ed25519PrivateKey) -> str:
     return b64url(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
 
 
+def x25519_public(key: X25519PrivateKey) -> str:
+    return b64url(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+
+
+def x25519_from_b64(text: str) -> X25519PublicKey:
+    data = b64url_decode(text)  # ValueError if not canonical base64url
+    if len(data) != _KEY_BYTES:
+        raise ValueError("not an X25519 public key")
+    return X25519PublicKey.from_public_bytes(data)
+
+
+def x25519_from_seed(seed: bytes) -> X25519PrivateKey:
+    """For test vectors and tests only: a fixed key from 32 fixed bytes."""
+    return X25519PrivateKey.from_private_bytes(seed)
+
+
+def _write_new(path: Path, data: bytes) -> None:
+    """Creates the file only if it doesn't exist: two processes starting at once both keep the first key."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(path, "xb") as fh:
+            fh.write(data)
+    except FileExistsError:
+        pass
+
+
+def load_kx(identity_dir: Path) -> X25519PrivateKey:
+    """The agent's key-exchange key (its public half is in the card). Created on first use."""
+    path = Path(identity_dir) / "kx.key"
+    if not path.is_file():
+        _write_new(path, X25519PrivateKey.generate().private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+    key = load_pem_private_key(path.read_bytes(), password=None)
+    if not isinstance(key, X25519PrivateKey):
+        raise ValueError(f"{path} is not an X25519 key")
+    return key
+
+
+def load_record_key(identity_dir: Path) -> bytes:
+    """The key that encrypts this agent's Tessera records on disk. Created on first use."""
+    path = Path(identity_dir) / "record.key"
+    if not path.is_file():
+        _write_new(path, (b64url(secrets.token_bytes(32)) + "\n").encode())
+    key = b64url_decode(path.read_text(encoding="utf-8").strip())
+    if len(key) != 32:
+        raise ValueError(f"{path} is not a 32-byte key")
+    return key
+
+
 class Identity:
     """This agent's signing key. The private key never leaves this object."""
 
@@ -52,6 +103,8 @@ def generate_identity(identity_dir: Path) -> str:
     key_path.write_bytes(key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
     agent_id = _agent_id(key)
     pub_path.write_text(agent_id + "\n", encoding="utf-8")
+    load_kx(identity_dir)
+    load_record_key(identity_dir)
     return agent_id
 
 
