@@ -20,6 +20,7 @@ COMMANDS = {
     "peers": "list accepted agents and connection requests; peers accept|reject|remove <id>",
     "connect": 'save another agent to ask: connect <address> <their id> --name <name> --purpose "<why>"',
     "ask": 'ask a connected agent one question over Tessera: ask <name> "<question>"',
+    "relay": "run a Tessera relay that agents connect out to (--host, --port, --max-agents, --public-url)",
 }
 
 
@@ -41,8 +42,15 @@ def main(argv=None) -> int:
     parser.add_argument("--name", help="peers accept / connect: a name for the other agent")
     parser.add_argument("--level", type=int, default=1, help="peers accept: Tessera level (only 1 = Ask for now)")
     parser.add_argument("--purpose", help="connect: why you're connecting (shown to their owner)")
+    parser.add_argument("--host", default="127.0.0.1", help="relay: address to listen on (0.0.0.0 = every network)")
+    parser.add_argument("--port", type=int, default=8200, help="relay: port to listen on")
+    parser.add_argument("--max-agents", type=int, default=100, help="relay: most agents connected at once")
+    parser.add_argument("--public-url", help="relay: the address agents and askers use, e.g. https://relay.example.com")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    if args.command == "relay":
+        from localagent.relay.http import run_relay
+        return run_relay(args.host, args.port, args.max_agents, args.public_url)
 
     try:
         config = load_config(resolve_agent_dir(args.agent))

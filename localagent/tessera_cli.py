@@ -227,6 +227,9 @@ def run(command: str, config, args, log=print) -> int:
                 raise ConfigError(f"{config.agent_dir} has no identity/agent.pub "
                                   "(agents created with scripts/new_agent.py have one)")
             log(agent_id)
+            relay = config.installables.connections.get("tessera", {}).get("relay")
+            if isinstance(relay, str) and relay:
+                log(f"Through the relay: {relay.rstrip('/')}/a/{agent_id}")
             return 0
         if command == "peers":
             return _peers(config, args.rest, args, log)

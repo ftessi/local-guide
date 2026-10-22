@@ -124,6 +124,47 @@ only `/back` and `exit` on their own are commands; everything else goes to `acme
 model, not yours, so a slow computer gets the speed of theirs. (`chat` still loads your own model; the `ask` command
 above doesn't.)
 
+## Through a relay
+
+A relay lets the other side reach your Tessera-facing agent without your address and without opening a port: your
+agent connects out to the relay and receives the questions there. Many agents can use one relay at the same time.
+
+**On your side**, add the relay to `tessera-acme/installables.yaml`:
+
+```yaml
+connections:
+  tessera:
+    builtin: true
+    relay: https://relay.example.com
+    listed: true                         # optional: appear in the relay's public list (default: not listed)
+    description: "Questions about contract v3"   # optional, shown in that list next to the agent's name
+```
+
+Without `host:`/`port:` no port is opened; add them to be reachable directly too. Start it as usual
+(`python -m localagent serve --agent tessera-acme`); it prints `Tessera via relay: <address>` once connected and
+reconnects by itself if the relay goes away. Give the other owner that address and the agent's id
+(`python -m localagent id --agent tessera-acme` shows both). Accepting them works exactly as above.
+
+**On their side** nothing changes: `connect <the relay address> <your id> --name acme --purpose "..."`, then `ask`,
+`/ask` or `/talk`.
+
+**The list:** `GET <relay>/agents` shows the listed agents that are connected now (id, name, description, address).
+
+**Running a relay** (any small server; standard library only):
+
+```bash
+python -m localagent relay --host 0.0.0.0 --port 8200 --public-url https://relay.example.com
+```
+
+Put HTTPS in front of it (a reverse proxy or a tunnel, page 4). `--max-agents` (default 100) limits how many agents
+are connected at once; each agent can have 8 questions waiting. Anyone holding an agent's key can connect that agent;
+there are no accounts yet.
+
+**What the relay can and can't do:** it can't change a message or forge one (every message is signed and chained),
+can't pretend to be your agent (connecting needs your agent's key), and can't skip your acceptance or the adapter
+(your agent checks them). It **can** read the messages (until end-to-end encryption in v0.2), see who talks to whom
+and when, and delay or drop messages.
+
 ## Records
 
 Each side keeps one file per session: `tessera/<other agent's id>/<session>.jsonl`, every message signed and
@@ -153,6 +194,11 @@ Open model and `/talk`, 2026-10-17, same computer: `tessera-demo` (Qwen2.5-1.5B 
 - In `/talk demo`: an ordinary question and the shared secret were answered, a follow-up used the earlier turn
   (roughly: the 1.5B model garbled it), and the private secret was declined.
 
+Relay, 2026-10-22, same computer: `tessera-demo` connected only through a local relay (`relay:
+http://127.0.0.1:8200`, no port open; `/agents` listed it with its description), and `my-agent` talked to it with
+`/talk demo` at the relay address. An ordinary question was answered, the shared secret given, a follow-up recalled
+the earlier question, and the private secret declined. Both records (11 messages) were identical and verified.
+
 **Not yet tested:** two separate computers over a real network (the commands are exactly the ones above, with
 `host: 0.0.0.0`).
 
@@ -160,6 +206,7 @@ Open model and `/talk`, 2026-10-17, same computer: `tessera-demo` (Qwen2.5-1.5B 
 
 - **No encryption built in.** Messages are signed (nobody can alter them) but readable on the way. Use HTTPS (a
   tunnel or reverse proxy, page 4) across the internet. End-to-end encryption is planned for v0.2.
+- **A relay can read what passes through it** (see "Through a relay"); only end-to-end encryption (v0.2) will fix that.
 - **No rate limiting.** A stranger can make `tessera/requests.jsonl` grow by connecting with many new keys.
 - **Records can differ by one final question:** if the answering side rejects a question (an error reply), the
   asking side has it in its record and the answering side doesn't.

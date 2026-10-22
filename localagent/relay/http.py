@@ -1,0 +1,181 @@
+"""The relay's HTTP routes. Askers use the same POST /tessera as with a direct agent, under /a/<agent id>; agents
+connect out, register with their key and long-poll for requests. Standard library only."""
+import base64
+import json
+import logging
+import re
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import sleep
+from urllib.parse import urlsplit
+
+from localagent.protocol.tessera.envelope import MAX_BYTES
+from localagent.relay.core import BadToken, Busy, Full, Offline, Refused, Relay, TimedOut
+
+log = logging.getLogger(__name__)
+MAX_REGISTER_BYTES = 4096
+DISCARD_BYTES = 1 << 20  # a too-large body up to this size is read and dropped, so the client sees the 413
+AGENT_ROUTE = re.compile(r"/a/([A-Za-z0-9_-]{43})/(tessera|tessera/card|next|reply/([0-9a-f]{16}))")
+STATUS = {Offline: 503, Busy: 503, Full: 503, TimedOut: 504, BadToken: 401, Refused: 401}
+
+
+class _BadRequest(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def _handler(server):
+    class Handler(BaseHTTPRequestHandler):
+        timeout = 30  # seconds; a client that stops sending doesn't hold a thread forever
+
+        def do_GET(self):
+            self._route("GET")
+
+        def do_POST(self):
+            self._route("POST")
+
+        def _route(self, method: str):
+            path = urlsplit(self.path).path
+            relay = server.relay
+            try:
+                if method == "GET" and path == "/relay/challenge":
+                    return self._json(200, {"nonce": relay.challenge()})
+                if method == "POST" and path == "/relay/register":
+                    return self._register()
+                if method == "GET" and path == "/agents":
+                    return self._json(200, relay.directory(self._base()))
+                match = AGENT_ROUTE.fullmatch(path)
+                if not match:
+                    return self._send(404)
+                agent_id, what, request_id = match.groups()
+                if method == "POST" and what == "tessera":
+                    body = self._body(MAX_BYTES)
+                    return self._send(200, relay.deliver(agent_id, "envelope", body, server.deliver_timeout))
+                if method == "GET" and what == "tessera/card":
+                    return self._send(200, relay.deliver(agent_id, "card", b"", server.card_timeout))
+                if method == "GET" and what == "next":
+                    request = relay.next_request(agent_id, self._token(), server.poll_wait)
+                    if request is None:
+                        return self._send(204)
+                    return self._json(200, {"request": request.id, "kind": request.kind,
+                                            "payload": base64.b64encode(request.payload).decode()})
+                if method == "POST" and request_id:
+                    relay.reply(agent_id, self._token(), request_id, self._body(MAX_BYTES + 1))
+                    return self._send(204)
+                return self._send(404)
+            except _BadRequest as e:
+                self._json(e.status, {"error": str(e)})
+            except tuple(STATUS) as e:
+                self._json(STATUS[type(e)], {"error": str(e)})
+            except Exception:
+                log.exception("Relay failed on %s %s", method, path)
+                try:
+                    self._json(500, {"error": "relay error"})
+                except Exception:
+                    pass
+
+        def _register(self):
+            try:
+                data = json.loads(self._body(MAX_REGISTER_BYTES))
+            except ValueError as e:
+                raise _BadRequest(400, "the registration must be JSON") from e
+            fields_ok = (isinstance(data, dict)
+                         and all(isinstance(data.get(k), str) for k in ("agent_id", "nonce", "signature"))
+                         and isinstance(data.get("listed", False), bool)
+                         and all(isinstance(data.get(k, ""), str) for k in ("name", "description")))
+            if not fields_ok:
+                raise _BadRequest(400, "agent_id, nonce and signature are required texts")
+            token = server.relay.register(data["agent_id"], data["nonce"], data["signature"],
+                                          listed=data.get("listed", False), name=data.get("name", ""),
+                                          description=data.get("description", ""))
+            return self._json(200, {"token": token, "address": f"{self._base()}/a/{data['agent_id']}"})
+
+        def _body(self, limit: int) -> bytes:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError as e:
+                raise _BadRequest(400, "bad Content-Length") from e
+            if length < 0:
+                raise _BadRequest(400, "bad Content-Length")
+            if length > limit:
+                if length <= DISCARD_BYTES:
+                    self.rfile.read(length)
+                raise _BadRequest(413, f"larger than {limit} bytes")
+            return self.rfile.read(length)
+
+        def _token(self) -> str:
+            value = self.headers.get("Authorization") or ""
+            return value[len("Bearer "):] if value.startswith("Bearer ") else ""
+
+        def _base(self) -> str:
+            return server.public_url or f"http://{self.headers.get('Host') or f'{server.host}:{server.port}'}"
+
+        def _json(self, status: int, data) -> None:
+            self._send(status, json.dumps(data).encode())
+
+        def _send(self, status: int, data: bytes = b"") -> None:
+            self.send_response(status)
+            if status != 204:
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if status != 204:
+                self.wfile.write(data)
+
+        def log_message(self, *args):  # no request lines on the console
+            pass
+
+    return Handler
+
+
+class RelayServer:
+    def __init__(self, relay: Relay, host: str = "127.0.0.1", port: int = 8200, *, public_url: str | None = None,
+                 deliver_timeout: float = 300.0, card_timeout: float = 30.0, poll_wait: float = 25.0,
+                 sweep_seconds: float = 5.0):
+        self.relay = relay
+        self.public_url = (public_url or "").rstrip("/") or None
+        self.deliver_timeout, self.card_timeout, self.poll_wait = deliver_timeout, card_timeout, poll_wait
+        self.sweep_seconds = sweep_seconds
+        self._httpd = ThreadingHTTPServer((host, port), _handler(self))
+        self._httpd.daemon_threads = True
+        self.host, self.port = host, self._httpd.server_address[1]
+        self._stop = threading.Event()
+        self._threads: list[threading.Thread] = []
+
+    def start(self) -> None:
+        for target, name in ((self._httpd.serve_forever, "relay-http"), (self._sweep_loop, "relay-sweep")):
+            thread = threading.Thread(target=target, name=name, daemon=True)
+            thread.start()
+            self._threads.append(thread)
+
+    def _sweep_loop(self) -> None:
+        while not self._stop.wait(self.sweep_seconds):
+            self.relay.sweep()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._threads:  # shutdown() blocks until serve_forever() has returned, so only if it ran
+            self._httpd.shutdown()
+            self._threads = []
+        self._httpd.server_close()
+
+
+def run_relay(host: str, port: int, max_agents: int, public_url: str | None = None) -> int:
+    try:
+        server = RelayServer(Relay(max_agents=max_agents), host, port, public_url=public_url)
+    except OSError as e:
+        print(f"Error: the relay can't listen on {host}:{port} ({e})", file=sys.stderr)
+        return 2
+    server.start()
+    print(f"Tessera relay on http://{server.host}:{server.port}  (agents set `relay:` to its public address; "
+          "Ctrl+C stops it)")
+    try:
+        while True:
+            sleep(1)  # short sleeps so Ctrl+C works on Windows too
+    except KeyboardInterrupt:
+        print("\nRelay stopped.")
+    finally:
+        server.stop()
+    return 0
