@@ -77,6 +77,8 @@ def test_talk_sends_every_message_to_the_peer_until_back(monkeypatch, capsys):
     assert prompts == ["You: ", "You -> demo: ", "You -> demo: ", "You -> demo: ", "You -> demo: ", "You: ", "You: "]
     assert "demo says:\n  answer 1" in out and "agent got hi" in out
     assert "new session" not in out
+    from localagent.protocol.tessera.inspection import ASKER_NOTICE
+    assert ASKER_NOTICE in out
 
 
 def test_talk_to_an_unknown_name_stays_in_normal_mode(monkeypatch, capsys):

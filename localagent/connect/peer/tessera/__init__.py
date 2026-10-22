@@ -1,7 +1,9 @@
 """Tessera for LocalAgent: the built-in `tessera` connection, which only runs in an agent folder holding nothing
 private (the Tessera-facing agent). Endpoint core, HTTP binding and client are in the modules next to this one."""
 import json
+import logging
 import os
+import threading
 from pathlib import Path
 
 from localagent.connect.base import Connection, SetupError
@@ -188,6 +190,9 @@ class TesseraConnection(Connection):
             self.link = RelayLink(self.endpoint, identity, relay, name=ctx.config.name, listed=listed,
                                   description=description, audit=ctx.protocol.audit)
         self.agent_id = identity.agent_id
+        self.agent_dir, self.protocol, self.identity = ctx.config.agent_dir, ctx.protocol, identity
+        self._stop_inspection = threading.Event()
+        self._inspection_thread = None
 
     def start(self) -> None:
         if self.server is not None:
@@ -195,8 +200,29 @@ class TesseraConnection(Connection):
             print(f"Tessera: http://{self.server.host}:{self.server.port}/tessera  (agent id {self.agent_id})")
         if self.link is not None:
             self.link.start()  # prints the relay address once registered
+        from localagent.connect.peer.tessera import inspection_sender
+        try:
+            state = inspection_sender.load_state(self.agent_dir)
+        except (OSError, ValueError) as e:
+            print(f"Tessera inspection: state unreadable ({e})")
+            return
+        if state["enabled"]:
+            print(f"Tessera inspection: on (relay {state['relay']})")
+            self._inspection_thread = threading.Thread(target=self._send_loop, name="tessera-inspection", daemon=True)
+            self._inspection_thread.start()
+
+    def _send_loop(self) -> None:
+        from localagent.connect.peer.tessera import inspection_sender
+        while True:
+            try:
+                inspection_sender.send_finished(self.agent_dir, self.protocol, self.identity)
+            except Exception:
+                logging.getLogger(__name__).exception("Tessera inspection sending failed")
+            if self._stop_inspection.wait(300):
+                return
 
     def stop(self) -> None:
+        self._stop_inspection.set()
         if self.link is not None:
             self.link.stop()
         if self.server is not None:

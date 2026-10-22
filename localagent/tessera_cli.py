@@ -1,5 +1,6 @@
 """Tessera commands: id, peers, connect, ask. Outside the layers: reads the agent's config and files."""
 import json
+import logging
 import re
 import sys
 import unicodedata
@@ -9,16 +10,19 @@ from pathlib import Path
 import yaml
 
 from localagent.config import ConfigError
+from localagent.connect.peer.tessera import inspection_sender
 from localagent.connect.peer.tessera.client import Reply, TesseraClient
 from localagent.protocol.guard import Protocol
 from localagent.protocol.identity import AGENT_ID_RE, load_agent_id, load_identity
 from localagent.protocol.policy import PolicyError
+from localagent.protocol.tessera import inspection
 from localagent.protocol.tessera.chain import verify_record
 from localagent.protocol.tessera.envelope import EnvelopeError
 from localagent.protocol.prompts import REFUSAL
 
 REMOTE_NAME = re.compile(r"[a-z][a-z0-9_-]*")
 PURPOSE_MAX = 200
+log_ = logging.getLogger(__name__)
 ID_MARK = "id:"  # __main__ marks agent ids starting with "-" so argparse doesn't take them for options
 
 
@@ -206,6 +210,7 @@ def _connect(config, rest: list[str], args, log) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(remotes, sort_keys=True, allow_unicode=True), encoding="utf-8")
     log(f"Saved '{args.name}'. Ask with: python -m localagent ask {args.name} \"<question>\"")
+    log(inspection.ASKER_NOTICE)
     return 0
 
 
@@ -218,6 +223,7 @@ def _ask(config, rest: list[str], log) -> int:
         answer = asker.ask(name, question)
     finally:
         asker.close_all()
+        send_inspection_quietly(config)
     log(answer.text)
     return 0 if answer.reply.kind in ("answer", "decline") else 1
 
@@ -263,6 +269,61 @@ def _records(config, rest: list[str], args, log) -> int:
     return 0
 
 
+def send_inspection_quietly(config) -> None:
+    """After ask/chat: sends finished conversations when inspection is on. Never fails the command."""
+    try:
+        if inspection_sender.load_state(config.agent_dir)["enabled"]:
+            inspection_sender.send_finished(config.agent_dir, protocol_for(config), _identity(config))
+    except (ConfigError, OSError, ValueError) as e:
+        log_.warning("Could not send conversations for inspection: %s", e)
+
+
+def _inspection(config, rest: list[str], args, log) -> int:
+    state = inspection_sender.load_state(config.agent_dir)
+    if not rest:
+        on = f"on (relay {state['relay']})" if state["enabled"] else "off"
+        log(f"Inspection: {on}; {len(state['sent'])} conversations sent so far.")
+        return 0
+    if rest == ["off"]:
+        state["enabled"] = False
+        inspection_sender.save_state(config.agent_dir, state)
+        log("Inspection off. New conversations stay on this computer; what was already sent stays with the relay "
+            "operator's security analysis.")
+        return 0
+    if rest != ["on"]:
+        raise ConfigError("Use: inspection | inspection on [--relay <relay address>] | inspection off")
+    if not inspection.COMPANY_KEY:
+        raise ConfigError("This version has no company inspection key yet (scripts/new_inspection_key.py).")
+    relay = args.relay or config.installables.connections.get("tessera", {}).get("relay")
+    if not isinstance(relay, str) or not relay.startswith(("http://", "https://")):
+        raise ConfigError("inspection on needs --relay <relay address> (or relay: under connections.tessera)")
+    state.update(enabled=True, relay=relay.rstrip("/"))
+    inspection_sender.save_state(config.agent_dir, state)
+    log("Inspection on: every conversation of this agent, including the other agents' messages, is sent sealed to "
+        "the relay operator for security analysis: the earlier ones now, new ones when they finish.")
+    sent = inspection_sender.send_finished(config.agent_dir, protocol_for(config), _identity(config))
+    log(f"Sent {sent} conversation(s).")
+    return 0
+
+
+def inspect_file(path: str, key_path: str, delete: bool = False, log=print) -> int:
+    """For the company: opens one upload with the private key and prints it; --delete removes it afterwards."""
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    try:
+        key = load_pem_private_key(Path(key_path).read_bytes(), password=None)
+        if not isinstance(key, X25519PrivateKey):
+            raise ValueError(f"{key_path} is not an X25519 private key")
+        payload = inspection.open_upload(key, Path(path).read_bytes())
+    except (OSError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    log(json.dumps(payload, ensure_ascii=False, indent=2))
+    if delete:
+        Path(path).unlink()
+    return 0
+
+
 def run(command: str, config, args, log=print) -> int:
     try:
         if command == "id":
@@ -281,6 +342,8 @@ def run(command: str, config, args, log=print) -> int:
             return _connect(config, args.rest, args, log)
         if command == "records":
             return _records(config, args.rest, args, log)
+        if command == "inspection":
+            return _inspection(config, args.rest, args, log)
         return _ask(config, args.rest, log)
     except (ConfigError, PolicyError, ValueError, OSError) as e:
         print(f"Error: {e}", file=sys.stderr)
