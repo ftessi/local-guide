@@ -4,7 +4,7 @@ import pytest
 
 from localagent.protocol.guard import AuthError, Protocol
 from localagent.protocol.identity import generate_identity, load_agent_id
-from localagent.protocol.policy import PolicyError
+from localagent.protocol.policy import PeerEntry, PolicyError
 from localagent.protocol.scopes import Scope
 from localagent.protocol.session import Session
 from localagent.vault.store import Vault
@@ -252,3 +252,47 @@ def test_vault_rejects_bad_record_names(tmp_path):
         with pytest.raises(ValueError):
             v.append_tessera(bad, {})
     assert not (tmp_path / "tessera").exists()
+
+
+# ── Public mode (strangers through the relay) ──────────────────────────────
+
+def test_public_grant_for_strangers(tmp_path):
+    p = demo_side(tmp_path)
+    assert p.public_grant(BOB) == PeerEntry("public", 1)
+    assert p.requests() == []
+    assert p.public_grant("not an id") is None
+
+
+def test_public_grant_refuses_rejected_and_removed(tmp_path):
+    p = demo_side(tmp_path)
+    p.reject_request(BOB)
+    assert p.public_grant(BOB) is None
+    p.accept_peer(EVE, name="Eve")
+    p.remove_peer(EVE)
+    assert p.public_grant(EVE) is None
+
+
+def test_public_grant_needs_a_tessera_facing_agent(agent_dir):
+    assert proto(agent_dir).public_grant(BOB) is None
+
+
+def test_public_grant_rechecked_each_ask(tmp_path):
+    p = demo_side(tmp_path)
+    s = p.open_peer_session(BOB, public=True)
+    assert s.principal == f"peer:{BOB}"
+    p.reject_request(BOB)
+    with pytest.raises(AuthError):
+        p.open_peer_session(BOB, public=True)
+
+
+def test_open_peer_session_public_false_unchanged(tmp_path):
+    with pytest.raises(AuthError):
+        demo_side(tmp_path).open_peer_session(BOB)
+
+
+def test_public_sessions_marked(tmp_path):
+    p = demo_side(tmp_path)
+    p.mark_public_session(BOB, "s1")
+    p.mark_public_session(EVE, "s2")
+    assert p.public_sessions() == {f"{BOB}/s1", f"{EVE}/s2"}
+    assert p.record_names() == []
