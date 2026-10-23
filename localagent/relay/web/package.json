@@ -1,0 +1,11 @@
+{
+  "name": "tessera-relay-web",
+  "private": true,
+  "type": "module",
+  "description": "The relay's browser page. The noble libraries are vendored in node_modules/ exactly as npm ci installs them from package-lock.json.",
+  "dependencies": {
+    "@noble/ciphers": "2.4.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0"
+  }
+}

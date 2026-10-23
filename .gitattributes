@@ -1,0 +1,2 @@
+# Vendored npm files stay byte for byte as published (no line-ending conversion)
+localagent/relay/web/node_modules/** -text
