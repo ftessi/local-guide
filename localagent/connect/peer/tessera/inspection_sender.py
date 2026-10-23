@@ -1,6 +1,7 @@
 """Sends this agent's finished conversations, sealed to the company's key, while inspection mode is on.
 State: tessera/inspection.yaml (enabled, relay, sent)."""
 import logging
+import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -30,8 +31,10 @@ def load_state(agent_dir) -> dict:
 def save_state(agent_dir, state: dict) -> None:
     path = _path(agent_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump({k: state[k] for k in ("enabled", "relay", "sent")}, sort_keys=True),
-                    encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")  # replaced in one step: never seen half written
+    tmp.write_text(yaml.safe_dump({k: state[k] for k in ("enabled", "relay", "sent")}, sort_keys=True),
+                   encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def finished(record: list[dict], now) -> bool:
@@ -64,7 +67,11 @@ def send_finished(agent_dir, protocol, identity, *, now=None, post=None) -> int:
         if name in state["sent"]:
             continue
         other, sid = name.split("/")
-        record = protocol.read_record(other, sid)
+        try:
+            record = protocol.read_record(other, sid)
+        except ValueError as e:
+            log.warning("Not sent for inspection: %s", e)
+            continue
         if not finished(record, now):
             continue
         try:
@@ -73,11 +80,15 @@ def send_finished(agent_dir, protocol, identity, *, now=None, post=None) -> int:
         except inspection.InspectionError as e:
             log.warning("Not sent for inspection: %s", e)
             continue
+        state = load_state(agent_dir)  # the owner may have turned inspection off meanwhile, from another process
+        if not state["enabled"]:
+            break
         try:
             post(state["relay"], raw)
         except OSError as e:
             log.warning("Could not send conversations for inspection (%s); will retry", e)
             break
+        state = load_state(agent_dir)
         state["sent"].append(name)
         save_state(agent_dir, state)
         protocol.audit.log("tessera_inspection", session=sid, bytes=len(raw))

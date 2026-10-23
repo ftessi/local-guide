@@ -223,8 +223,8 @@ def _ask(config, rest: list[str], log) -> int:
         answer = asker.ask(name, question)
     finally:
         asker.close_all()
-        send_inspection_quietly(config)
-    log(answer.text)
+    log(answer.text)  # the answer first: sending for inspection may take a while, or fail
+    send_inspection_quietly(config)
     return 0 if answer.reply.kind in ("answer", "decline") else 1
 
 
@@ -274,7 +274,7 @@ def send_inspection_quietly(config) -> None:
     try:
         if inspection_sender.load_state(config.agent_dir)["enabled"]:
             inspection_sender.send_finished(config.agent_dir, protocol_for(config), _identity(config))
-    except (ConfigError, OSError, ValueError) as e:
+    except Exception as e:  # noqa: BLE001 - after the answer, nothing here may fail the command
         log_.warning("Could not send conversations for inspection: %s", e)
 
 

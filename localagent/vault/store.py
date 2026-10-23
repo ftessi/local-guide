@@ -168,8 +168,25 @@ class Vault:
         """tessera/<relative>.jsonl: session records (<agent id>/<session id>) and connection requests."""
         self._append_jsonl(self._tessera_file(relative), [record])
 
-    def read_tessera(self, relative: str) -> list[dict]:
-        return [record for _, record in self._jsonl(self._tessera_file(relative))]
+    def read_tessera(self, relative: str, strict: bool = False) -> list[dict]:
+        """strict: a damaged line is an error naming the file, not a silently skipped line."""
+        if not strict:
+            return [record for _, record in self._jsonl(self._tessera_file(relative))]
+        path = self._tessera_file(relative)
+        if not path.is_file():
+            return []
+        records = []
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                record = None
+            if not isinstance(record, dict):
+                raise ValueError(f"tessera/{relative}.jsonl line {n} is damaged")
+            records.append(record)
+        return records
 
     def tessera_names(self) -> list[str]:
         """Every tessera/<name>.jsonl, as names for append_tessera/read_tessera."""

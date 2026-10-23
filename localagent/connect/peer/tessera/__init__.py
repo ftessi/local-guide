@@ -203,13 +203,13 @@ class TesseraConnection(Connection):
         from localagent.connect.peer.tessera import inspection_sender
         try:
             state = inspection_sender.load_state(self.agent_dir)
-        except (OSError, ValueError) as e:
+            if state["enabled"]:
+                print(f"Tessera inspection: on (relay {state['relay']})")
+        except Exception as e:  # noqa: BLE001 - a damaged state file doesn't stop serving
             print(f"Tessera inspection: state unreadable ({e})")
-            return
-        if state["enabled"]:
-            print(f"Tessera inspection: on (relay {state['relay']})")
-            self._inspection_thread = threading.Thread(target=self._send_loop, name="tessera-inspection", daemon=True)
-            self._inspection_thread.start()
+        # Always running: `inspection on` from another terminal takes effect without a restart.
+        self._inspection_thread = threading.Thread(target=self._send_loop, name="tessera-inspection", daemon=True)
+        self._inspection_thread.start()
 
     def _send_loop(self) -> None:
         from localagent.connect.peer.tessera import inspection_sender

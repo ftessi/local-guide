@@ -74,8 +74,8 @@ class SealedEndpoint:
         f = self.new_key()
         reply = self.endpoint.handle(inner, e=e_pub, f=x25519_public(f))
         env = json.loads(reply)  # our own signed message
-        if env["type"] == "error":  # a stale or badly signed hello: no session, no keys
-            return seal.error_package(reply)
+        if env["type"] == "error":  # a stale or badly signed hello: no session, no keys, and not who asked
+            return self._clear_error(env["body"]["code"])
         handle = secrets.token_hex(8)
         sealed, keys = seal.seal_welcome(self.kx, f, e_pub, raw, handle, reply)
         if env["type"] == "welcome":

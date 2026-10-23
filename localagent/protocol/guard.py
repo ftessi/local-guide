@@ -1,5 +1,6 @@
 """The guard: opens sessions, builds training sets, keeps Tessera's peer list and records. The only owner of the vault."""
 import hmac
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -191,7 +192,7 @@ class Protocol:
         self.vault.append_tessera(name, seal_line(self._key(), name, record))
 
     def _read(self, name: str) -> list[dict]:
-        lines = self.vault.read_tessera(name)
+        lines = self.vault.read_tessera(name, strict="/" in name)  # session records: a damaged line is an error
         return [open_line(self._key(), name, line) for line in lines] if lines else []
 
     def record_names(self) -> list[str]:
@@ -201,7 +202,11 @@ class Protocol:
         """Records written before v0.2 are encrypted in place, once. Returns how many files changed."""
         changed = 0
         for name in self.vault.tessera_names():
-            lines = self.vault.read_tessera(name)
+            try:
+                lines = self.vault.read_tessera(name, strict="/" in name)
+            except ValueError as e:
+                logging.getLogger(__name__).warning("Not encrypted, left as it was: %s", e)
+                continue
             if lines and not all(is_sealed(line) for line in lines):
                 self.vault.rewrite_tessera(name, [line if is_sealed(line) else seal_line(self._key(), name, line)
                                                   for line in lines])

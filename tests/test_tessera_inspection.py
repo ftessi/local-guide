@@ -146,3 +146,69 @@ def test_new_inspection_key_script(tmp_path, capsys):
     assert module.main(["--out", str(tmp_path / "k.pem")]) == 0
     assert "COMPANY_KEY" in capsys.readouterr().out and (tmp_path / "k.pem").is_file()
     assert module.main(["--out", str(tmp_path / "k.pem")]) == 2  # never overwrites
+
+
+def test_inspection_off_in_another_process_stops_a_running_send(tmp_path):
+    d, me, p = agent(tmp_path, {"s-1": {}, "s-2": {}})
+    inspection_sender.save_state(d, {"enabled": True, "relay": "http://r", "sent": []})
+    got = []
+
+    def post(relay, raw, **kw):
+        got.append(raw)
+        assert main(["inspection", "off", "--agent", str(d)]) == 0  # the owner, meanwhile
+
+    assert inspection_sender.send_finished(d, p, me, post=post) == 1
+    assert len(got) == 1 and inspection_sender.load_state(d)["enabled"] is False
+
+
+def test_an_unreadable_record_doesnt_stop_the_others(tmp_path):
+    d, me, p = agent(tmp_path, {"s-1": {}, "s-2": {}})
+    (d / "tessera" / B.agent_id / "s-1.jsonl").write_text("{broken\n", encoding="utf-8")
+    inspection_sender.save_state(d, {"enabled": True, "relay": "http://r", "sent": []})
+    got = []
+    assert inspection_sender.send_finished(d, p, me, post=lambda relay, raw, **kw: got.append(raw)) == 1
+    assert inspection.open_upload(COMPANY, got[0])["session"] == "s-2"
+
+
+def test_ask_prints_the_answer_even_if_sending_for_inspection_breaks(tmp_path, capsys, monkeypatch):
+    import http.client
+    from localagent import tessera_cli
+    from localagent.connect.peer.tessera.client import Reply
+    d, *_ = agent(tmp_path, {})
+    inspection_sender.save_state(d, {"enabled": True, "relay": "http://r", "sent": []})
+    order = []
+
+    class FakeAsker:
+        def ask(self, name, question):
+            return tessera_cli.Answer("The answer.", Reply("answer", "The answer."))
+
+        def close_all(self):
+            pass
+
+    def broken(*args, **kwargs):
+        order.append(capsys.readouterr().out)  # what the user already sees when sending starts
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(tessera_cli, "make_asker", lambda config: FakeAsker())
+    monkeypatch.setattr(inspection_sender, "send_finished", broken)
+    assert main(["ask", "bob", "q", "--agent", str(d)]) == 0
+    assert len(order) == 1 and "The answer." in order[0]
+
+
+def test_serve_sends_once_inspection_is_turned_on_later(tmp_path, monkeypatch):
+    import threading
+    from localagent.connect.peer.tessera import TesseraConnection
+    d, me, p = agent(tmp_path, {})
+    (d / "tessera").mkdir(exist_ok=True)
+    (d / "tessera" / "inspection.yaml").write_text("enabled: [unclosed\n", encoding="utf-8")  # half written
+    called = threading.Event()
+    monkeypatch.setattr(inspection_sender, "send_finished", lambda *a, **k: called.set() or 0)
+    c = TesseraConnection.__new__(TesseraConnection)
+    c.server = c.link = None
+    c.agent_dir, c.protocol, c.identity = d, p, me
+    c._stop_inspection, c._inspection_thread = threading.Event(), None
+    c.start()  # inspection is off (unreadable state): serve still starts, and keeps checking
+    try:
+        assert called.wait(5)
+    finally:
+        c.stop()

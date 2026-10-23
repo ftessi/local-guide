@@ -88,3 +88,27 @@ def test_records_command(tmp_path, capsys):
     assert main(["records", "export", "s-1", "--to", str(out), "--agent", str(d)]) == 0
     assert [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()] == record
     assert main(["records", "show", "nope", "--agent", str(d)]) == 2
+
+
+def test_a_corrupt_record_line_is_an_error_not_a_gap(tmp_path):
+    d = agent(tmp_path)
+    p = Protocol.for_agent(d, ["demo"], tools={}, owner_secret="")
+    for env in session_record():
+        p.record_envelope(B.agent_id, "s-1", env)
+    path = d / "tessera" / B.agent_id / "s-1.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join([lines[0], lines[1][:40], lines[2]]) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="s-1.jsonl"):
+        p.read_record(B.agent_id, "s-1")
+
+
+def test_an_old_record_with_a_corrupt_line_is_left_as_it_was(tmp_path):
+    d = agent(tmp_path)
+    folder = d / "tessera" / B.agent_id
+    folder.mkdir(parents=True)
+    text = json.dumps(session_record()[0]) + "\n{not json\n" + json.dumps(session_record()[1]) + "\n"
+    (folder / "s-1.jsonl").write_text(text, encoding="utf-8")
+    p = Protocol.for_agent(d, ["demo"], tools={}, owner_secret="")
+    assert (folder / "s-1.jsonl").read_text(encoding="utf-8") == text  # nothing dropped
+    with pytest.raises(ValueError, match="s-1.jsonl"):
+        p.read_record(B.agent_id, "s-1")
