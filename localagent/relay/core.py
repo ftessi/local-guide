@@ -61,6 +61,7 @@ class Request:
 class _Agent:
     token: str
     listed: bool
+    public: bool
     name: str
     description: str
     last_seen: float
@@ -95,7 +96,7 @@ class Relay:
             return nonce
 
     def register(self, agent_id: str, nonce: str, signature: str, *, listed: bool = False, name: str = "",
-                 description: str = "") -> str:
+                 description: str = "", public: bool = False) -> str:
         with self._cond:
             self._sweep()
             known = isinstance(nonce, str) and self._challenges.pop(nonce, None) is not None  # used up either way
@@ -107,7 +108,7 @@ class Relay:
             if len(self._agents) >= self.max_agents:
                 raise Full(f"the relay already has {self.max_agents} agents")
             token = secrets.token_urlsafe(24)
-            self._agents[agent_id] = _Agent(token, bool(listed), _clean(name, NAME_CHARS),
+            self._agents[agent_id] = _Agent(token, bool(listed), bool(public), _clean(name, NAME_CHARS),
                                             _clean(description, DESCRIPTION_CHARS), self.clock())
             self._cond.notify_all()
             self._event("register", agent=agent_id)
@@ -171,8 +172,8 @@ class Relay:
         with self._cond:
             self._sweep()
             base = base.rstrip("/")
-            return [{"id": agent_id, "name": a.name, "description": a.description, "address": f"{base}/a/{agent_id}"}
-                    for agent_id, a in self._agents.items() if a.listed]
+            return [{"id": agent_id, "name": a.name, "description": a.description, "address": f"{base}/a/{agent_id}",
+                     "public": a.public} for agent_id, a in self._agents.items() if a.listed]
 
     def sweep(self) -> None:
         with self._cond:

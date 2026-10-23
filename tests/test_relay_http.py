@@ -139,7 +139,8 @@ def test_directory_route(relay_server):
     status, raw = call(relay_server, "GET", "/agents")
     assert status == 200
     assert json.loads(raw) == [{"id": ANA.agent_id, "name": "Ana", "description": "Demo answers",
-                                "address": f"http://127.0.0.1:{relay_server.port}/a/{ANA.agent_id}"}]
+                                "address": f"http://127.0.0.1:{relay_server.port}/a/{ANA.agent_id}",
+                                "public": False}]
 
 
 def test_public_url_is_used_for_addresses():
@@ -224,3 +225,63 @@ def test_inspection_inbox(tmp_path):
 
 def test_without_an_inbox_inspection_is_404(relay_server):
     assert call(relay_server, "POST", "/relay/inspection", b"x")[0] == 404
+
+
+def test_register_public_over_http(relay_server):
+    assert register(relay_server, listed=True, public=True)[0] == 200
+    assert json.loads(call(relay_server, "GET", "/agents")[1])[0]["public"] is True
+    assert register(relay_server, public="yes")[0] == 400
+
+
+def limited_server(tmp_path, **kw):
+    server = RelayServer(Relay(), "127.0.0.1", 0, poll_wait=0.2, deliver_timeout=0.5, card_timeout=0.5,
+                         inbox=tmp_path / "inbox", **kw)
+    server.start()
+    return server
+
+
+def call_from(server, method, path, body=None, forwarded=None):
+    request = Request(f"http://127.0.0.1:{server.port}{path}", data=body, method=method)
+    if forwarded:
+        request.add_header("X-Forwarded-For", forwarded)
+    try:
+        with urlopen(request, timeout=10) as response:
+            return response.status
+    except HTTPError as e:
+        return e.code
+
+
+def test_chat_posts_rate_limited_per_ip(tmp_path):
+    server = limited_server(tmp_path, chat_per_minute=2)
+    try:
+        path = f"/a/{ANA.agent_id}/tessera"
+        assert [call_from(server, "POST", path, b"x") for _ in range(3)] == [503, 503, 429]
+        assert call_from(server, "GET", f"{path}/card") == 503  # cards aren't counted
+    finally:
+        server.stop()
+
+
+def test_uploads_rate_limited(tmp_path):
+    server = limited_server(tmp_path, uploads_per_minute=1)
+    try:
+        assert [call_from(server, "POST", "/relay/inspection", b"sealed") for _ in range(2)] == [204, 429]
+    finally:
+        server.stop()
+
+
+def test_forwarded_for_ignored_without_trusted_proxy(tmp_path):
+    server = limited_server(tmp_path, uploads_per_minute=1)
+    try:
+        assert [call_from(server, "POST", "/relay/inspection", b"s", forwarded=ip)
+                for ip in ("1.1.1.1", "2.2.2.2")] == [204, 429]
+    finally:
+        server.stop()
+
+
+def test_forwarded_for_used_from_trusted_proxy(tmp_path):
+    server = limited_server(tmp_path, uploads_per_minute=1, trusted_proxy="127.0.0.1")
+    try:
+        assert [call_from(server, "POST", "/relay/inspection", b"s", forwarded=ip)
+                for ip in ("1.1.1.1", "evil, 2.2.2.2", "2.2.2.2")] == [204, 204, 429]
+    finally:
+        server.stop()

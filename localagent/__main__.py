@@ -25,7 +25,7 @@ COMMANDS = {
     "inspection": "send this agent's finished conversations to the relay operator for security analysis: "
                   "inspection | inspection on [--relay URL] | inspection off",
     "inspect": "for the relay operator: open an inspection upload (inspect <file> --key <private key> [--delete])",
-    "relay": "run a Tessera relay that agents connect out to (--host, --port, --max-agents, --public-url)",
+    "relay": "run a Tessera relay that agents connect out to (--host, --port, --max-agents, --public-url, --trusted-proxy)",
 }
 
 
@@ -57,6 +57,8 @@ def main(argv=None) -> int:
     parser.add_argument("--log-days", type=int, default=90, help="relay: days the connection log keeps")
     parser.add_argument("--inbox-mb", type=int, default=1024, help="relay: most megabytes of inspection uploads")
     parser.add_argument("--public-url", help="relay: the address agents and askers use, e.g. https://relay.example.com")
+    parser.add_argument("--trusted-proxy", help="relay: the address of your own HTTPS proxy in front of it; the "
+                                                "visitor's IP is then read from its X-Forwarded-For")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if args.command == "inspect":
@@ -68,7 +70,7 @@ def main(argv=None) -> int:
     if args.command == "relay":
         from localagent.relay.http import run_relay
         return run_relay(args.host, args.port, args.max_agents, args.public_url, args.data_dir, args.log_days,
-                         args.inbox_mb)
+                         args.inbox_mb, args.trusted_proxy)
 
     try:
         config = load_config(resolve_agent_dir(args.agent))

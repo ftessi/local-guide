@@ -183,7 +183,7 @@ def test_directory_lists_only_connected_listed_agents_with_clean_text():
     join(relay, BOB)
     assert relay.directory("https://relay.example/") == [
         {"id": ANA.agent_id, "name": "Ana[2J", "description": "x" * 200,
-         "address": f"https://relay.example/a/{ANA.agent_id}"}]
+         "address": f"https://relay.example/a/{ANA.agent_id}", "public": False}]
 
 
 def test_max_agents():
@@ -200,3 +200,10 @@ def test_challenges_are_capped():
         relay.challenge()
     with pytest.raises(Busy):
         relay.challenge()
+
+
+def test_directory_shows_public_flag():
+    relay = Relay()
+    join(relay, ANA, listed=True, public=True)
+    join(relay, BOB, listed=True)
+    assert {a["id"]: a["public"] for a in relay.directory("http://r")} == {ANA.agent_id: True, BOB.agent_id: False}
