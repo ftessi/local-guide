@@ -89,7 +89,7 @@ never letting adapter files leave your machine.
 - Tessera rehearsal on one computer with the real model: correct answer for the shared fact, no private leak
   (including after a restart), identical and tamper-evident records on both sides (page 8).
 
-## Current status (2026-10-12)
+## Current status (2026-10-23)
 
 **Done and on `master`:**
 - The layered core, installables (MCP tools and your own code), the phone app, reminders and the Cloudflare tunnel.
@@ -100,13 +100,12 @@ never letting adapter files leave your machine.
   self-checking folder, owner-accepted peers; rehearsed with the real model on one computer.
 - The `llamacpp` backend (page 13), open Tessera-facing agents and `/talk` (page 8).
 - The **relay** (`python -m localagent relay`): agents reachable without sharing an address, an opt-in directory.
+- Tessera v0.2: end-to-end encryption, records encrypted at rest (`records`), a metadata-only relay, and inspection
+  mode with the company's inspection key (page 8).
 - Installs on any computer: per-platform PyTorch, then `requirements.txt` (or `requirements-nvidia.txt`).
 - The extensions repository (phone app, calendar, tunnel) is public at
   https://github.com/ftessi/local-guide-extensions; agents install from it with `source:` + `path:`.
 - Documentation rewritten into these twelve subject pages.
-
-**On branch `tessera-e2e`:** Tessera v0.2: end-to-end encryption, records encrypted at rest (`records`), a
-metadata-only relay, and inspection mode (page 8).
 
 **Exists only on the owner's computer:** `tessera-protocol` (the specification, schema and test vectors).
 

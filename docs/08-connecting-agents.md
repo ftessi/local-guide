@@ -204,7 +204,14 @@ While it is on, every finished conversation of that agent (closed, or past its e
 messages, is signed by the agent, sealed to the company's public key (built into LocalAgent) and sent to the relay's
 inbox. Turning it on also sends every earlier conversation once. The relay can't open uploads; the company's security
 agent opens them with an offline private key, keeps only security findings, and deletes the upload. What was sent
-stays analysed if the owner turns inspection off later.
+stays analysed if the owner turns inspection off later. A running `serve` picks up `on` and `off` without a restart.
+
+For the company, one upload opens with the private key (made once with `scripts/new_inspection_key.py`, kept offline
+and never in a repository):
+
+```bash
+python -m localagent inspect <relay-data>/inbox/<file>.sealed --key <private key file> --delete
+```
 
 ## Results so far
 
@@ -236,9 +243,13 @@ secret declined. `records verify` passed on both sides, both exports (11 message
 either side contained the secret in plain text. The relay's `connections.jsonl` held only metadata (registrations and
 deliveries with sizes and timing): no content, and not who asked.
 
+Inspection mode, 2026-10-23, same computer: with the company key set, `inspection on` for `tessera-demo` sent its 17
+earlier conversations to a local relay's inbox; none held the secret in plain text, and the relay logged only sizes.
+All 17 opened with the company's private key, signed by the agent; the latest was identical to the agent's own
+record (11 messages). Another key was refused. After `inspection off`, the count of sent conversations stayed at 17.
+
 **Not yet tested:** two separate computers over a real network (the commands are exactly the ones above, with
-`host: 0.0.0.0`); inspection mode end to end, which waits for the company key (until it is set, `inspection on`
-says so and nothing is sent).
+`host: 0.0.0.0`).
 
 ## Known limitations
 
