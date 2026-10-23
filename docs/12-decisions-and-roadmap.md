@@ -16,6 +16,7 @@ step-by-step implementation plans these were taken from are in the git history (
 | 2026-10-11 | Proof of concept: two secrets trained into per-compartment adapters, and Tessera v0.1 between agents, rehearsed with the real model |
 | 2026-10-13 | llama.cpp backend: 3B model 18× faster on the GTX 1050, CPU 4–5× faster; the same adapters work on both backends |
 | 2026-10-19 | Tessera relay: agents reachable without sharing an address, many at once, opt-in directory |
+| 2026-10-23 | Tessera v0.2: end-to-end encryption, records encrypted at rest, metadata-only relay, inspection mode |
 
 ## Core decisions
 
@@ -57,6 +58,11 @@ step-by-step implementation plans these were taken from are in the git history (
 | 12 | Tessera is **independent of its transport**; HTTP for v0.1 | Security comes from the signed envelopes and from what's behind the endpoint, not from the transport. |
 | 13 | The model answering a peer is treated as **controlled by that peer** | Nothing it must not reveal is reachable from its session: no tools, no owner data, no private adapter. |
 | 14 | A **relay carries signed envelopes only**; agents connect out and long-poll it (HTTP, standard library) | The relay can't forge, change or answer anything, so trusting it is limited to availability and privacy (until v0.2's E2E). Long-polling needs no new dependency and passes any proxy that allows HTTPS; a WebSocket binding can replace it later. |
+| 15 | **Always end-to-end encrypted**; v0.1 and plaintext removed | Nothing to stay compatible with (unpublished), and a fallback is something an attacker can force. |
+| 16 | **Sign inside, encrypt outside** (Noise IK pattern: X25519, HKDF-SHA256, ChaCha20-Poly1305) | Records and their checks stay as they were; the relay doesn't see who asks, or whether a reply was a welcome or a refuse. |
+| 17 | **Records encrypted at rest** with a per-agent key | A copy of the records alone reveals nothing. |
+| 18 | **The relay keeps metadata only** | Nothing worth stealing on the relay; data minimisation. |
+| 19 | **Inspection mode**: owners send finished conversations sealed to the company key; the company keeps findings, not conversations | Security analysis with the owner's consent, without the relay reading anything. |
 
 ## Decisions of the llama.cpp backend
 
@@ -92,17 +98,15 @@ never letting adapter files leave your machine.
   evaluation script; both proof-of-concept secrets trained and measured.
 - Tessera v0.1 (level 1, Ask): signed and chained messages, one Tessera-facing agent per connection with a
   self-checking folder, owner-accepted peers; rehearsed with the real model on one computer.
+- The `llamacpp` backend (page 13), open Tessera-facing agents and `/talk` (page 8).
+- The **relay** (`python -m localagent relay`): agents reachable without sharing an address, an opt-in directory.
 - Installs on any computer: per-platform PyTorch, then `requirements.txt` (or `requirements-nvidia.txt`).
 - The extensions repository (phone app, calendar, tunnel) is public at
   https://github.com/ftessi/local-guide-extensions; agents install from it with `source:` + `path:`.
 - Documentation rewritten into these twelve subject pages.
 
-**On branch `llamacpp-backend`:** the `llamacpp` backend (GGUF models through `llama-server`; Vulkan, CUDA, Metal
-or CPU), with adapters converted automatically and switched per request (page 13). On the GTX 1050: Qwen2.5-3B
-at 28 tokens/s instead of 1.5 (page 10); both trained adapters measured the same as on transformers.
-Tessera-facing agents answer as open assistants, and `chat` has `/talk <name>` for conversations (page 8).
-
-**On branch `tessera-relay`:** a **relay** (`python -m localagent relay`): Tessera-facing agents connect out to it, so they can be reached without sharing an address; several at once, with an opt-in directory (page 8).
+**On branch `tessera-e2e`:** Tessera v0.2: end-to-end encryption, records encrypted at rest (`records`), a
+metadata-only relay, and inspection mode (page 8).
 
 **Exists only on the owner's computer:** `tessera-protocol` (the specification, schema and test vectors).
 
@@ -117,9 +121,9 @@ Tessera-facing agents answer as open assistants, and `chat` has `/talk <name>` f
 - The internal model learning everything shared with every connection (decision 5).
 - Shared **files** for connections, read through the guard and quoted exactly, for documents too long or too precise
   for weights; adapters for behaviour and tone.
-- **Tessera v0.2:** end-to-end encryption by default, from the moment a message is created, in the handshake (so no
-  tunnel, proxy or relay can read messages; an opt-in protection service may inspect messages for malicious attempts),
-  a persistent socket binding for direct links, rate limiting, replay tracking.
+- **Tessera v0.3:** a persistent socket binding for direct links, rate limiting; protecting keys at rest
+  (passphrase or the operating system's key store); the **security agent** that analyses inspection uploads and
+  keeps only findings.
 - **Tessera levels 2–4:** documents with citations, negotiation with owner-signed agreements, narrow delegation.
 - Recommend `llamacpp` for NVIDIA cards too in `new_agent.py` (measured so far only on the GTX 1050).
 - **MLX** backend (Mac).

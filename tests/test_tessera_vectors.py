@@ -7,7 +7,7 @@ from localagent.protocol.tessera.chain import verify_record
 from localagent.protocol.tessera.envelope import envelope_hash
 from localagent.protocol.tessera.vectors import build_vectors
 
-FILE = Path(__file__).parent / "data" / "tessera_vectors_v0.1.json"
+FILE = Path(__file__).parent / "data" / "tessera_vectors_v0.2.json"
 
 
 def test_published_vectors_match_this_implementation():
@@ -26,3 +26,14 @@ def test_vectors_are_self_consistent():
         assert envelope_hash(env) == item["hash"]
     session = [i["envelope"] for i in v["envelopes"] if i["name"] in ("hello", "welcome", "ask", "answer")]
     verify_record(session)
+    from localagent.protocol.identity import x25519_from_seed
+    from localagent.protocol.tessera import seal
+    keys = v["x25519"]
+    kx, e = (x25519_from_seed(bytes.fromhex(keys[n]["seed_hex"])) for n in ("kx_A", "e_B"))
+    p = {item["name"]: item["package"].encode("utf-8") for item in v["packages"]}
+    _, inner = seal.open_hello(kx, seal.parse(p["hello"]))
+    assert inner.decode("utf-8") == next(i for i in v["envelopes"] if i["name"] == "hello")["canonical"]
+    welcome, asker_keys, handle, _ = seal.open_welcome(e, keys["kx_A"]["public"], p["hello"], seal.parse(p["welcome"]))
+    assert asker_keys.send.hex() == v["session_keys"]["asker_to_agent"] and handle == v["handle"]
+    assert seal.open_msg(seal.Keys(send=asker_keys.recv, recv=asker_keys.send), seal.TO_AGENT,
+                         seal.parse(p["ask"])).decode("utf-8") == next(i for i in v["envelopes"] if i["name"] == "ask")["canonical"]

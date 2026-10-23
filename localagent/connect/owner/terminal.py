@@ -1,5 +1,6 @@
 """Owner transport: chat from the terminal."""
 from localagent.protocol.guard import AuthError
+from localagent.protocol.tessera.inspection import ASKER_NOTICE
 
 NEW_SESSION = "(new session with {name}: it doesn't remember the earlier conversation)"
 
@@ -58,7 +59,8 @@ def run_terminal(protocol, agent, secret: str, ask=None) -> int:
                     print(problem, "\n")
                     continue
                 talking, last_session = parts[1], _session(ask, parts[1])
-                print(f"Talking with {talking}. Everything you type goes to it; '/back' returns to your agent.\n")
+                print(f"Talking with {talking}. Everything you type goes to it; '/back' returns to your agent.\n"
+                      f"{ASKER_NOTICE}\n")
                 continue
             print("Agent: ", end="", flush=True)
             try:

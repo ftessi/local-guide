@@ -29,7 +29,7 @@ def verify_record(envelopes: list[dict]) -> None:
     """Checks a stored record end to end: every shape, signature and link. Raises only EnvelopeError."""
     chain = Chain()
     for env in envelopes:
-        check_shape(env)
+        check_shape(env, versions=("0.1", "0.2"))
         try:
             signed = canonical({k: v for k, v in env.items() if k != "sig"})
         except CanonicalError as e:

@@ -6,15 +6,17 @@ from localagent.agent.core import Agent
 from localagent.connect.peer.tessera.client import Reply, TesseraClient
 from localagent.connect.peer.tessera.endpoint import TesseraEndpoint, utc_now
 from localagent.connect.peer.tessera.http import TesseraServer
+from localagent.connect.peer.tessera.sealed import SealedEndpoint
 from localagent.connect.peer.tessera.http import post as http_post
 from localagent.protocol.guard import Protocol
-from localagent.protocol.identity import identity_from_seed
+from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera.chain import verify_record
 from localagent.protocol.tessera.envelope import encode
 from localagent.testing import FakeBackend
 
 A = identity_from_seed(bytes(range(32)))
 B = identity_from_seed(bytes(range(32, 64)))
+KX = x25519_from_seed(bytes(range(96, 128)))
 
 
 def a_side(tmp_path, replies):
@@ -24,8 +26,8 @@ def a_side(tmp_path, replies):
     (path / "adapter.json").write_text(json.dumps({"compartment": "demo", "base_model": "org/model"}))
     protocol = Protocol.for_agent(d, ["demo"], tools={}, owner_secret="t")
     endpoint = TesseraEndpoint(A, protocol, Agent(FakeBackend(replies=replies), {}, model_id="org/model"),
-                               name="Ana's agent")
-    return protocol, endpoint
+                               name="Ana's agent", kx_public=x25519_public(KX))
+    return protocol, SealedEndpoint(endpoint, KX)
 
 
 def b_protocol(tmp_path):
@@ -36,9 +38,14 @@ def direct(endpoint):
     return lambda address, raw, **kw: endpoint.handle(raw)
 
 
+def no_card(address, **kw):
+    raise OSError("no card")
+
+
 def client(b, endpoint, post=None):
     return TesseraClient(B, b, remote_id=A.agent_id, address="http://unused", purpose="Review contract v3",
-                         post=post or direct(endpoint))
+                         post=post or direct(endpoint),
+                         get_card=(lambda address, **kw: endpoint.card()) if endpoint else no_card)
 
 
 def fail_on_call(monkeypatch, protocol, nth, exc=OSError):
@@ -85,7 +92,8 @@ def test_reconnects_when_the_other_side_restarted(tmp_path):
     a.accept_peer(B.agent_id, name="Bob")
     c = client(b_protocol(tmp_path), endpoint)
     assert c.ask("1?").kind == "answer"
-    endpoint._sessions.clear()  # what a restart of the answering side looks like
+    endpoint.endpoint._sessions.clear()  # what a restart of the answering side looks like
+    endpoint._links.clear()
     assert c.ask("2?") == Reply("answer", "Two.")
 
 
@@ -100,7 +108,8 @@ def test_a_reply_from_someone_else_is_rejected(tmp_path):
     a, endpoint = a_side(tmp_path, ["x"])
     a.accept_peer(B.agent_id, name="Bob")
     impostor = TesseraClient(B, b_protocol(tmp_path), remote_id=identity_from_seed(bytes(32)).agent_id,
-                             address="x", purpose="p", post=direct(endpoint))
+                             address="x", purpose="p", post=direct(endpoint),
+                             get_card=lambda address, **kw: endpoint.card())
     assert impostor.ask("Q?") == Reply("not_connected")
 
 
@@ -134,8 +143,8 @@ def test_a_failed_record_of_an_ask_is_an_error_and_sends_nothing(tmp_path, monke
     b = b_protocol(tmp_path)
     fail_on_call(monkeypatch, b, 3)  # hello, welcome, then the ask
     assert client(b, endpoint).ask("Q?") == Reply("error", "could not record locally")  # does not raise
-    (session,) = endpoint._sessions.values()
-    assert session.asks_left == endpoint.max_asks  # the other side never received the ask
+    (session,) = endpoint.endpoint._sessions.values()
+    assert session.asks_left == endpoint.endpoint.max_asks  # the other side never received the ask
 
 
 def test_a_failed_record_of_the_reply_is_an_error_and_the_session_ends(tmp_path, monkeypatch):
@@ -157,7 +166,7 @@ def test_close_swallows_a_failed_record(tmp_path, monkeypatch):
     fail_on_call(monkeypatch, b, 1, exc=ValueError)  # the close is the next record
     c.close()  # does not raise
     assert c._sid is None
-    (session,) = endpoint._sessions.values()
+    (session,) = endpoint.endpoint._sessions.values()
     assert not session.closed  # the other side never received the close
 
 
@@ -193,7 +202,7 @@ def test_a_bad_content_length_gets_an_error_envelope(tmp_path):
         for value in ("-5", "abc"):
             status, body = _raw_post(server.port, value)
             assert status == 200
-            assert body["type"] == "error" and body["body"]["code"] == "malformed"
+            assert body["kind"] == "error" and body["env"]["body"]["code"] == "malformed"
     finally:
         server.stop()
 
@@ -213,24 +222,28 @@ def signed_by_c(type_, body, session="s-1", seq=1):
 
 
 def test_a_validly_signed_reply_from_a_third_identity_is_not_connected(tmp_path):
+    a, endpoint = a_side(tmp_path, ["x"])
     welcome = signed_by_c("welcome", {"session": "s-1", "granted_level": 1, "expires": "2999-01-01T00:00:00Z",
-                                      "limits": {"asks": 5, "ask_chars": 100}})
-    c = client(b_protocol(tmp_path), None, post=lambda address, raw: welcome)
-    assert c.ask("Q?") == Reply("not_connected")
+                                      "limits": {"asks": 5, "ask_chars": 100},
+                                      "f": x25519_public(KX)})
+    endpoint.endpoint.handle = lambda raw, **kw: welcome  # sealed correctly, but signed by C
+    assert client(b_protocol(tmp_path), endpoint).ask("Q?") == Reply("not_connected")
 
 
 def test_a_validly_signed_answer_from_a_third_identity_is_an_error(tmp_path):
     a, endpoint = a_side(tmp_path, ["x"])
     a.accept_peer(B.agent_id, name="Bob")
-    calls = []
+    real, sessions = endpoint.endpoint.handle, []
 
-    def post(address, raw, **kw):
-        calls.append(raw)
-        if len(calls) == 1:
-            return endpoint.handle(raw)
-        return signed_by_c("answer", {"text": "from the wrong agent"}, session=json.loads(calls[1])["session"], seq=3)
+    def handle(raw, **kw):
+        if not sessions:
+            reply = real(raw, **kw)
+            sessions.append(json.loads(reply)["body"]["session"])
+            return reply
+        return signed_by_c("answer", {"text": "from the wrong agent"}, session=sessions[0], seq=3)
 
-    reply = client(b_protocol(tmp_path), None, post=post).ask("Q?")
+    endpoint.endpoint.handle = handle
+    reply = client(b_protocol(tmp_path), endpoint).ask("Q?")
     assert reply.kind == "error" and "from the wrong agent" not in reply.text
 
 
@@ -238,14 +251,17 @@ def test_a_welcome_granting_more_than_requested_is_not_connected(tmp_path):
     a, endpoint = a_side(tmp_path, ["x"])
     a.accept_peer(B.agent_id, name="Bob")
 
-    def post(address, raw, **kw):
-        env = json.loads(endpoint.handle(raw))
+    real = endpoint.endpoint.handle
+
+    def handle(raw, **kw):
+        env = json.loads(real(raw, **kw))
         from localagent.protocol.tessera.envelope import sign_envelope
         env["body"]["granted_level"] = 2
         return encode(sign_envelope(A, type="welcome", session=env["session"], to=env["to"], seq=env["seq"],
                                     prev=env["prev"], body=env["body"], now=utc_now()))
 
-    assert client(b_protocol(tmp_path), None, post=post).ask("Q?") == Reply("not_connected")
+    endpoint.endpoint.handle = handle
+    assert client(b_protocol(tmp_path), endpoint).ask("Q?") == Reply("not_connected")
 
 
 def test_close_uses_a_short_timeout(tmp_path):
@@ -257,7 +273,7 @@ def test_close_uses_a_short_timeout(tmp_path):
         timeouts.append(timeout)
         return endpoint.handle(raw)
 
-    c = client(b_protocol(tmp_path), None, post=post)
+    c = client(b_protocol(tmp_path), endpoint, post=post)
     assert c.ask("1?").kind == "answer"
     c.close()
     assert timeouts[-1] <= 5 < timeouts[0]

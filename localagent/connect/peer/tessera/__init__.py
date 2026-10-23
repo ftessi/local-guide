@@ -1,11 +1,13 @@
 """Tessera for LocalAgent: the built-in `tessera` connection, which only runs in an agent folder holding nothing
 private (the Tessera-facing agent). Endpoint core, HTTP binding and client are in the modules next to this one."""
 import json
+import logging
 import os
+import threading
 from pathlib import Path
 
 from localagent.connect.base import Connection, SetupError
-from localagent.protocol.identity import load_identity
+from localagent.protocol.identity import load_identity, load_kx, x25519_public
 from localagent.protocol.scopes import INTERNAL_COMPARTMENT as INTERNAL
 from localagent.protocol.session import model_slug
 
@@ -160,7 +162,14 @@ class TesseraConnection(Connection):
         except (OSError, ValueError) as e:
             raise SetupError(f"No usable identity in {identity_dir} ({e}). Agents created with "
                              "scripts/new_agent.py have one.") from e
-        self.endpoint = TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name)
+        try:
+            kx = load_kx(identity_dir)
+        except (OSError, ValueError) as e:
+            raise SetupError(f"No usable key-exchange key in {identity_dir} ({e})") from e
+        self.kx = kx
+        from localagent.connect.peer.tessera.sealed import SealedEndpoint
+        self.endpoint = SealedEndpoint(TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
+                                                       kx_public=x25519_public(kx)), kx)
         settings = ctx.settings
         relay, listed, description = settings.get("relay"), settings.get("listed", False), settings.get("description", "")
         if relay is not None and not (isinstance(relay, str) and relay.startswith(("http://", "https://"))):
@@ -181,6 +190,9 @@ class TesseraConnection(Connection):
             self.link = RelayLink(self.endpoint, identity, relay, name=ctx.config.name, listed=listed,
                                   description=description, audit=ctx.protocol.audit)
         self.agent_id = identity.agent_id
+        self.agent_dir, self.protocol, self.identity = ctx.config.agent_dir, ctx.protocol, identity
+        self._stop_inspection = threading.Event()
+        self._inspection_thread = None
 
     def start(self) -> None:
         if self.server is not None:
@@ -188,8 +200,29 @@ class TesseraConnection(Connection):
             print(f"Tessera: http://{self.server.host}:{self.server.port}/tessera  (agent id {self.agent_id})")
         if self.link is not None:
             self.link.start()  # prints the relay address once registered
+        from localagent.connect.peer.tessera import inspection_sender
+        try:
+            state = inspection_sender.load_state(self.agent_dir)
+            if state["enabled"]:
+                print(f"Tessera inspection: on (relay {state['relay']})")
+        except Exception as e:  # noqa: BLE001 - a damaged state file doesn't stop serving
+            print(f"Tessera inspection: state unreadable ({e})")
+        # Always running: `inspection on` from another terminal takes effect without a restart.
+        self._inspection_thread = threading.Thread(target=self._send_loop, name="tessera-inspection", daemon=True)
+        self._inspection_thread.start()
+
+    def _send_loop(self) -> None:
+        from localagent.connect.peer.tessera import inspection_sender
+        while True:
+            try:
+                inspection_sender.send_finished(self.agent_dir, self.protocol, self.identity)
+            except Exception:
+                logging.getLogger(__name__).exception("Tessera inspection sending failed")
+            if self._stop_inspection.wait(300):
+                return
 
     def stop(self) -> None:
+        self._stop_inspection.set()
         if self.link is not None:
             self.link.stop()
         if self.server is not None:

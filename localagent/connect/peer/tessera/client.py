@@ -5,8 +5,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from http.client import HTTPException
 
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
 from localagent.connect.peer.tessera.endpoint import utc_now
+from localagent.connect.peer.tessera.http import get_card as http_get_card
 from localagent.connect.peer.tessera.http import post as http_post
+from localagent.protocol.identity import x25519_public
+from localagent.protocol.tessera import seal
+from localagent.protocol.tessera.canonical import canonical
 from localagent.protocol.tessera.chain import Chain
 from localagent.protocol.tessera.envelope import EnvelopeError, decode, encode, parse_time, sign_envelope
 
@@ -23,9 +29,13 @@ class Reply:
 
 class TesseraClient:
     def __init__(self, identity, protocol, *, remote_id: str, address: str, purpose: str, post=http_post,
-                 clock=utc_now):
+                 get_card=http_get_card,
+                 clock=utc_now, new_key=X25519PrivateKey.generate):
         self.identity, self.protocol, self.remote_id = identity, protocol, remote_id
         self.address, self.purpose, self._post, self._clock = address, purpose, post, clock
+        self._new_key, self._get_card = new_key, get_card
+        self._keys, self._handle, self._out, self._in = None, "", 1, 1  # the open session's encryption
+        self._e = None  # the one-time key of the last hello
         self._sid: str | None = None
         self._chain = Chain()
         self._expires: datetime | None = None
@@ -41,20 +51,48 @@ class TesseraClient:
         return sign_envelope(self.identity, type=type_, session=session, to=self.remote_id, seq=seq, prev=prev,
                              body=body, now=self._clock())
 
-    def _send(self, env: dict) -> dict:
-        reply = decode(self._post(self.address, encode(env)), self._clock())
-        if reply["from"] != self.remote_id or reply["to"] != self.identity.agent_id:
+    def _check(self, env: dict, *, anyone: bool = False) -> dict:
+        """A reply must come from the agent we asked and be addressed to us ('' allowed for clear errors)."""
+        allowed = (self.identity.agent_id, "") if anyone or env["type"] == "error" else (self.identity.agent_id,)
+        if env["from"] != self.remote_id or env["to"] not in allowed:
             raise EnvelopeError("bad_signature", "the reply comes from an unexpected agent")
-        return reply
+        return env
+
+    def _agent_kx(self) -> str:
+        card = decode(self._get_card(self.address), self._clock())
+        if card["type"] != "card" or card["from"] != self.remote_id or card["body"]["agent_id"] != self.remote_id:
+            raise EnvelopeError("bad_signature", "the card isn't this agent's")
+        return card["body"]["kx"]
+
+    def _exchange(self, env: dict) -> dict:
+        """Sends one message of the open session and returns the checked reply (an error envelope included)."""
+        raw = seal.seal_msg(self._keys, seal.TO_AGENT, self._out, self._handle, encode(env))
+        self._out += 1
+        package = seal.parse(self._post(self.address, raw))
+        if package["kind"] == "error":
+            return self._check(decode(canonical(package["env"]), self._clock()), anyone=True)
+        if package["kind"] != "msg" or package["h"] != self._handle or package["n"] != self._in:
+            raise seal.SealError("bad_chain", "an unexpected package")
+        self._in += 1
+        return self._check(decode(seal.open_msg(self._keys, seal.TO_ASKER, package), self._clock()))
 
     def _connect(self) -> bool:
-        hello = self._sign("hello", {"purpose": self.purpose, "requested_level": REQUESTED_LEVEL, "nonce": secrets.token_hex(16)},
-                           session="", seq=0, prev="")
         try:
-            reply = self._send(hello)
-        except (OSError, HTTPException, EnvelopeError):
+            kx = self._agent_kx()
+            self._e = self._new_key()
+            hello = self._sign("hello", {"purpose": self.purpose, "requested_level": REQUESTED_LEVEL,
+                                         "nonce": secrets.token_hex(16), "e": x25519_public(self._e)},
+                               session="", seq=0, prev="")
+            hello_raw = seal.seal_hello(self._e, kx, encode(hello))
+            package = seal.parse(self._post(self.address, hello_raw))
+            if package["kind"] != "welcome":
+                return False
+            inner, keys, handle, f = seal.open_welcome(self._e, kx, hello_raw, package)
+            reply = self._check(decode(inner, self._clock()))
+        except (OSError, HTTPException, EnvelopeError, seal.SealError):
             return False
-        if reply["type"] != "welcome" or not 1 <= reply["body"]["granted_level"] <= REQUESTED_LEVEL:
+        if (reply["type"] != "welcome" or reply["body"]["f"] != f
+                or not 1 <= reply["body"]["granted_level"] <= REQUESTED_LEVEL):
             return False
         chain = Chain()
         try:
@@ -71,6 +109,7 @@ class TesseraClient:
             return False
         self._sid, self._chain, self._expires = body["session"], chain, parse_time(body["expires"])
         self._asks_left, self._max_chars = body["limits"]["asks"], body["limits"]["ask_chars"]
+        self._keys, self._handle, self._out, self._in = keys, handle, 1, 1
         return True
 
     def _ready(self) -> bool:
@@ -100,11 +139,11 @@ class TesseraClient:
         self._chain.append(ask)
         self._asks_left -= 1
         try:
-            reply = self._send(ask)
+            reply = self._exchange(ask)
         except (OSError, HTTPException):
             self._sid = None
             return Reply("error", "unreachable")
-        except EnvelopeError as e:
+        except (EnvelopeError, seal.SealError) as e:
             self._sid = None
             return Reply("error", f"invalid reply ({e.code})")
         if reply["type"] == "error":
@@ -140,7 +179,9 @@ class TesseraClient:
             return
         self._chain.append(close)
         try:
-            self._post(self.address, encode(close), timeout=CLOSE_TIMEOUT)
+            self._post(self.address, seal.seal_msg(self._keys, seal.TO_AGENT, self._out, self._handle, encode(close)),
+                       timeout=CLOSE_TIMEOUT)
+            self._out += 1
         except (OSError, HTTPException):
             pass
         self._sid = None

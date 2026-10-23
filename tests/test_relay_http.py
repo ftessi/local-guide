@@ -175,13 +175,52 @@ def test_the_sweeper_drops_silent_agents():
         server.stop()
 
 
-def test_relay_command(monkeypatch, capsys):
+def test_relay_command(monkeypatch, capsys, tmp_path):
     from localagent.__main__ import main
 
     def interrupt(seconds):
         raise KeyboardInterrupt
 
     monkeypatch.setattr("localagent.relay.http.sleep", interrupt)
-    assert main(["relay", "--port", "0"]) == 0
+    assert main(["relay", "--port", "0", "--data-dir", str(tmp_path / "data")]) == 0
     out = capsys.readouterr().out
     assert "Tessera relay on http://127.0.0.1:" in out and "Relay stopped." in out
+    assert (tmp_path / "data" / "inbox").is_dir()
+
+
+def test_the_relay_logs_metadata_and_never_content(tmp_path):
+    from localagent.relay.log import RelayLog
+    server = RelayServer(Relay(), "127.0.0.1", 0, poll_wait=0.2, deliver_timeout=2,
+                         log=RelayLog(tmp_path / "connections.jsonl"))
+    server.start()
+    try:
+        token = token_of(server)
+        thread, result = in_background(lambda: call(server, "POST", f"/a/{ANA.agent_id}/tessera", b"SECRET-CONTENT"))
+        job = next_job(server, token)
+        call(server, "POST", f"/a/{ANA.agent_id}/reply/{job['request']}", b"SECRET-REPLY", token=token)
+        thread.join(5)
+        call(server, "POST", f"/a/{'B' * 43}/tessera", b"x")
+    finally:
+        server.stop()
+    text = (tmp_path / "connections.jsonl").read_text(encoding="utf-8")
+    assert "SECRET" not in text
+    events = [json.loads(line) for line in text.splitlines()]
+    assert events[0]["event"] == "register" and events[0]["agent"] == ANA.agent_id
+    deliver = [e for e in events if e["event"] == "deliver"]
+    assert deliver[0]["outcome"] == "answered" and deliver[0]["bytes_in"] == 14 and deliver[0]["bytes_out"] == 12
+    assert deliver[1]["outcome"] == "offline"
+
+
+def test_inspection_inbox(tmp_path):
+    server = RelayServer(Relay(), "127.0.0.1", 0, inbox=tmp_path / "inbox", inbox_bytes=10)
+    server.start()
+    try:
+        assert call(server, "POST", "/relay/inspection", b"sealed")[0] == 204
+        assert [f.read_bytes() for f in (tmp_path / "inbox").iterdir()] == [b"sealed"]
+        assert call(server, "POST", "/relay/inspection", b"too much")[0] == 503  # over the cap
+    finally:
+        server.stop()
+
+
+def test_without_an_inbox_inspection_is_404(relay_server):
+    assert call(relay_server, "POST", "/relay/inspection", b"x")[0] == 404

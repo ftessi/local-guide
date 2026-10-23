@@ -1,6 +1,7 @@
 """Passive, labeled storage over an agent folder. Applies the filters it is given; decides nothing."""
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -167,8 +168,42 @@ class Vault:
         """tessera/<relative>.jsonl: session records (<agent id>/<session id>) and connection requests."""
         self._append_jsonl(self._tessera_file(relative), [record])
 
-    def read_tessera(self, relative: str) -> list[dict]:
-        return [record for _, record in self._jsonl(self._tessera_file(relative))]
+    def read_tessera(self, relative: str, strict: bool = False) -> list[dict]:
+        """strict: a damaged line is an error naming the file, not a silently skipped line."""
+        if not strict:
+            return [record for _, record in self._jsonl(self._tessera_file(relative))]
+        path = self._tessera_file(relative)
+        if not path.is_file():
+            return []
+        records = []
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                record = None
+            if not isinstance(record, dict):
+                raise ValueError(f"tessera/{relative}.jsonl line {n} is damaged")
+            records.append(record)
+        return records
+
+    def tessera_names(self) -> list[str]:
+        """Every tessera/<name>.jsonl, as names for append_tessera/read_tessera."""
+        root = self.root / "tessera"
+        if not root.is_dir():
+            return []
+        names = (p.relative_to(root).with_suffix("").as_posix() for p in sorted(root.rglob("*.jsonl")))
+        return [n for n in names if _TESSERA_NAME.fullmatch(n)]
+
+    def rewrite_tessera(self, relative: str, records: list[dict]) -> None:
+        """Replaces a record file in one step: a new file, then a rename."""
+        path = self._tessera_file(relative)
+        tmp = path.with_name(path.name + ".tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            for record in records:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        os.replace(tmp, path)
 
     def append_memory(self, compartment: str, record: dict) -> None:
         if compartment not in self.compartments and not compartment.startswith(PEER_PREFIX):

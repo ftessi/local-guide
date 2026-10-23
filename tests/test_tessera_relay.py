@@ -12,7 +12,7 @@ from localagent.protocol.identity import generate_identity, identity_from_seed
 from localagent.protocol.tessera.chain import verify_record
 from localagent.relay.core import Relay
 from localagent.relay.http import RelayServer
-from localagent.tessera_cli import make_asker
+from localagent.tessera_cli import make_asker, protocol_for
 from localagent.testing import FakeBackend
 from tests.fakes import write_agent_yaml
 
@@ -50,6 +50,16 @@ def test_an_agent_reached_only_through_the_relay(tmp_path, relay_server, capsys)
     assert conn.server is None  # no port opened
     b = write_agent_yaml(tmp_path / "b", B_YAML, installables=None)
     b_id = generate_identity(b / "identity")
+    carried = []
+    real_deliver = relay_server.relay.deliver
+
+    def deliver(agent_id, kind, payload, timeout):
+        reply = real_deliver(agent_id, kind, payload, timeout)
+        if kind == "envelope":
+            carried.extend([payload, reply])
+        return reply
+
+    relay_server.relay.deliver = deliver
     conn.start()
     try:
         assert conn.link.connected.wait(5)
@@ -64,15 +74,15 @@ def test_an_agent_reached_only_through_the_relay(tmp_path, relay_server, capsys)
             assert asker("ana", "What is the private secret?") == "ana declined: I can't share that."
             assert "You asked about the shared secret." in asker("ana", "What did I ask first?")
             sid = asker.session("ana")
+            assert carried and not any(s in b"".join(carried) for s in (b"shared secret", b"GREEN-LANTERN",
+                                                                          b"private secret", b_id.encode()))
         finally:
             asker.close_all()
     finally:
         conn.stop()
     assert "What is the shared secret?" in json.dumps(backend.calls[-1])  # the follow-up saw the earlier turn
-    b_record = [json.loads(line) for line in
-                (b / "tessera" / facing_id / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()]
-    a_record = [json.loads(line) for line in
-                (facing / "tessera" / b_id / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()]
+    b_record = protocol_for(load_config(b)).read_record(facing_id, sid)
+    a_record = protocol_for(load_config(facing)).read_record(b_id, sid)
     assert a_record == b_record and len(a_record) == 9  # hello, welcome, 3 x (ask, reply), close
     verify_record(a_record)
 

@@ -20,6 +20,11 @@ COMMANDS = {
     "peers": "list accepted agents and connection requests; peers accept|reject|remove <id>",
     "connect": 'save another agent to ask: connect <address> <their id> --name <name> --purpose "<why>"',
     "ask": 'ask a connected agent one question over Tessera: ask <name> "<question>"',
+    "records": "show this agent's Tessera records, decrypted: records | records show|verify <session> | "
+               "records export <session> --to <file>",
+    "inspection": "send this agent's finished conversations to the relay operator for security analysis: "
+                  "inspection | inspection on [--relay URL] | inspection off",
+    "inspect": "for the relay operator: open an inspection upload (inspect <file> --key <private key> [--delete])",
     "relay": "run a Tessera relay that agents connect out to (--host, --port, --max-agents, --public-url)",
 }
 
@@ -42,22 +47,35 @@ def main(argv=None) -> int:
     parser.add_argument("--name", help="peers accept / connect: a name for the other agent")
     parser.add_argument("--level", type=int, default=1, help="peers accept: Tessera level (only 1 = Ask for now)")
     parser.add_argument("--purpose", help="connect: why you're connecting (shown to their owner)")
+    parser.add_argument("--relay", help="inspection on: the relay that receives uploads")
+    parser.add_argument("--key", help="inspect: the company's private key file")
+    parser.add_argument("--delete", action="store_true", help="inspect: remove the upload afterwards")
     parser.add_argument("--host", default="127.0.0.1", help="relay: address to listen on (0.0.0.0 = every network)")
     parser.add_argument("--port", type=int, default=8200, help="relay: port to listen on")
     parser.add_argument("--max-agents", type=int, default=100, help="relay: most agents connected at once")
+    parser.add_argument("--data-dir", default="relay-data", help="relay: where its connection log and inbox live")
+    parser.add_argument("--log-days", type=int, default=90, help="relay: days the connection log keeps")
+    parser.add_argument("--inbox-mb", type=int, default=1024, help="relay: most megabytes of inspection uploads")
     parser.add_argument("--public-url", help="relay: the address agents and askers use, e.g. https://relay.example.com")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    if args.command == "inspect":
+        from localagent.tessera_cli import inspect_file
+        if len(args.rest) != 1 or not args.key:
+            print("Error: use: inspect <file> --key <private key file> [--delete]", file=sys.stderr)
+            return 2
+        return inspect_file(args.rest[0], args.key, args.delete)
     if args.command == "relay":
         from localagent.relay.http import run_relay
-        return run_relay(args.host, args.port, args.max_agents, args.public_url)
+        return run_relay(args.host, args.port, args.max_agents, args.public_url, args.data_dir, args.log_days,
+                         args.inbox_mb)
 
     try:
         config = load_config(resolve_agent_dir(args.agent))
         if args.command in ("examples", "train", "export"):
             from localagent import train_cli
             return train_cli.run(args.command, config, args)
-        if args.command in ("id", "peers", "connect", "ask"):
+        if args.command in ("id", "peers", "connect", "ask", "records", "inspection"):
             from localagent import tessera_cli
             return tessera_cli.run(args.command, config, args)
         if args.command in ("install", "list"):
@@ -96,9 +114,11 @@ def main(argv=None) -> int:
 
     if args.command == "chat":
         from localagent.connect.owner.terminal import run_terminal
-        from localagent.tessera_cli import make_asker
-        return run_terminal(services.protocol, services.agent, config.get_env("AGENT_SECRET"),
+        from localagent.tessera_cli import make_asker, send_inspection_quietly
+        code = run_terminal(services.protocol, services.agent, config.get_env("AGENT_SECRET"),
                             ask=make_asker(config))
+        send_inspection_quietly(config)
+        return code
 
     from localagent.connect.serve import serve
     return serve(services.connections, services.tools)
