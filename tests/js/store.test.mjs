@@ -100,3 +100,13 @@ test("known agents are remembered for offline chats", () => {
   new Store(storage).rememberAgent(AGENT, { name: "Demo", description: "Answers" });
   assert.deepEqual(new Store(storage).knownAgents(), { [AGENT]: { name: "Demo", description: "Answers" } });
 });
+
+test("a chat that grows after inspection is pending again, and open sessions are never pending", () => {
+  const store = new Store(new FakeStorage());
+  store.saveRecord(AGENT, "s-1", [env("hello"), welcome("2026-10-23T11:00:00Z"), env("ask")]); // expired by NOW
+  store.markInspected(AGENT, "s-1");
+  assert.deepEqual(store.pendingUploads(NOW), []);
+  store.saveRecord(AGENT, "s-1", [env("hello"), welcome("2026-10-23T11:00:00Z"), env("ask"), env("answer")]);
+  assert.deepEqual(store.pendingUploads(NOW).map((p) => p.session), ["s-1"]);
+  assert.deepEqual(store.pendingUploads(NOW, new Set(["s-1"])), []); // still held open by a client
+});

@@ -313,3 +313,18 @@ def test_static_js_served_with_type(relay_server):
                                   "/index.html", "/static/"])
 def test_static_refuses_traversal_and_unlisted(relay_server, path):
     assert get(relay_server, path)[0] == 404
+
+
+def test_early_answers_read_the_body_so_the_client_sees_them(tmp_path):
+    import socket
+    server = limited_server(tmp_path, uploads_per_minute=1)
+    try:
+        assert call_from(server, "POST", "/relay/inspection", b"s") == 204
+        body = b"x" * 300_000
+        with socket.create_connection(("127.0.0.1", server.port), timeout=10) as s:
+            s.sendall(b"POST /relay/inspection HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n" % len(body))
+            time.sleep(0.3)  # the relay answers while the body is still on its way, as with a slow upload
+            s.sendall(body)
+            assert s.recv(64).startswith(b"HTTP/1.0 429")
+    finally:
+        server.stop()

@@ -14,6 +14,9 @@ class HttpError extends Error {
   }
 }
 
+/** Where an agent is reached on a relay: the page's own origin, never an address the relay reports. */
+export const agentAddress = (relayBase, agentId) => `${relayBase.replace(/\/+$/, "")}/a/${agentId}`;
+
 export class TesseraClient {
   constructor({ identity, agentId, address, fetch = (...a) => globalThis.fetch(...a), now = () => new Date(),
     newKey = seal.newKey, purpose = "browser chat" }) {

@@ -168,8 +168,8 @@ end-to-end encrypted like any agent, so the relay reads nothing. Chats are kept 
 storage); clearing the site's data starts fresh. Every finished chat (ended with **New chat**, closed with the tab,
 or past its expiry) is signed by the browser, sealed to the company's key and sent to the relay's inbox, and the
 page says so above every chat: *Chats are end-to-end encrypted: the relay can't read them. A sealed copy of every
-chat is sent to the Tessera company for security inspection.* An agent's own inspection mode skips these chats, so
-they aren't sent twice.
+chat is sent to the Tessera company for security inspection.* If the agent's owner also has inspection mode on,
+the agent sends its own copy too (it can't tell a browser from another agent that came through the relay).
 
 **Running a relay** (any small server; standard library only):
 

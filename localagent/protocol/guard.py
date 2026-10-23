@@ -187,7 +187,7 @@ class Protocol:
         self.audit.log("tessera_peer_removed", peer=agent_id)
 
     def mark_public_session(self, peer: str, session_id: str) -> None:
-        """Remembers that a session was opened in public mode (the browser uploads those for inspection itself)."""
+        """Remembers that a session was opened in public mode, not by the owner's acceptance."""
         self._append("public", {"peer": peer, "session": session_id})
 
     def public_sessions(self) -> set[str]:

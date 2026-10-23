@@ -221,10 +221,11 @@ def test_a_wrong_key_says_why():
         inspection.open_upload(x25519_from_seed(bytes(range(1, 33))), raw)
 
 
-def test_inspection_sender_skips_public_sessions(tmp_path):
+def test_inspection_sender_includes_public_sessions(tmp_path):
+    """Public mode also admits other agents through the relay, which don't upload: the owner's inspection covers them."""
     d, me, p = agent(tmp_path, {"s-1": {}, "s-2": {}})
     p.mark_public_session(B.agent_id, "s-2")
     inspection_sender.save_state(d, {"enabled": True, "relay": "http://r", "sent": []})
     sent = []
-    assert inspection_sender.send_finished(d, p, me, post=lambda relay, raw, **kw: sent.append(raw)) == 1
-    assert inspection.open_upload(COMPANY, sent[0])["session"] == "s-1"
+    assert inspection_sender.send_finished(d, p, me, post=lambda relay, raw, **kw: sent.append(raw)) == 2
+    assert sorted(inspection.open_upload(COMPANY, raw)["session"] for raw in sent) == ["s-1", "s-2"]

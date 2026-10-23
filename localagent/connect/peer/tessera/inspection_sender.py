@@ -63,9 +63,8 @@ def send_finished(agent_dir, protocol, identity, *, now=None, post=None) -> int:
         return 0
     now = now or utc_now()
     count = 0
-    public = protocol.public_sessions()  # the browser uploads those itself
     for name in protocol.record_names():
-        if name in state["sent"] or name in public:
+        if name in state["sent"]:
             continue
         other, sid = name.split("/")
         try:

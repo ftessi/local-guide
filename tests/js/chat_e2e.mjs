@@ -2,13 +2,13 @@
 // Usage: node tests/js/chat_e2e.mjs <relay url> <agent id> <question> [--company-key <key>]  (the key only for tests)
 import { randomBytes } from "node:crypto";
 
-import { TesseraClient } from "../../localagent/relay/web/js/client.js";
+import { TesseraClient, agentAddress } from "../../localagent/relay/web/js/client.js";
 import { identityFromSeed } from "../../localagent/relay/web/js/envelope.js";
 import { sealUpload, upload } from "../../localagent/relay/web/js/inspection.js";
 
 const [relay, agentId, question, flag, companyKey] = process.argv.slice(2);
 const identity = identityFromSeed(new Uint8Array(randomBytes(32)));
-const client = new TesseraClient({ identity, agentId, address: `${relay}/a/${agentId}` });
+const client = new TesseraClient({ identity, agentId, address: agentAddress(relay, agentId) });
 const reply = await client.ask(question);
 console.log(reply.kind, reply.text);
 const session = client.sessionId;

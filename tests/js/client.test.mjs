@@ -66,3 +66,8 @@ test("too long text is refused locally with the welcome's limit", async () => {
   assert.deepEqual(await c.ask("x".repeat(21)), { kind: "error", text: "too_long" });
   assert.equal(agent.state.posts, posts);
 });
+
+test("agent addresses come from the page's own origin", async () => {
+  const { agentAddress } = await import("../../localagent/relay/web/js/client.js");
+  assert.equal(agentAddress("https://relay.example/", AGENT.agentId), `https://relay.example/a/${AGENT.agentId}`);
+});

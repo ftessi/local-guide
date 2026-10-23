@@ -130,7 +130,8 @@ export class Store {
   saveRecord(agentId, session, envelopes) {
     const list = this.chats(agentId);
     const at = list.findIndex((c) => c.session === session);
-    if (at >= 0) list[at] = { ...list[at], envelopes };
+    // A chat that grew after it was sent for inspection is sent again, whole.
+    if (at >= 0) list[at] = { ...list[at], envelopes, inspected: list[at].inspected && envelopes.length === list[at].envelopes.length };
     else list.unshift({ session, envelopes, inspected: false, started: Date.now() });
     this._saveChats(agentId, list);
   }
@@ -139,10 +140,10 @@ export class Store {
     this._saveChats(agentId, this.chats(agentId).map((c) => (c.session === session ? { ...c, inspected: true } : c)));
   }
 
-  /** Finished chats not yet sent for inspection, from every agent. */
-  pendingUploads(now) {
+  /** Finished chats not yet sent for inspection, from every agent; never a session a client still holds open. */
+  pendingUploads(now, open = new Set()) {
     return this._agents().flatMap((agentId) => this.chats(agentId)
-      .filter((c) => !c.inspected && finished(c.envelopes, now))
+      .filter((c) => !c.inspected && !open.has(c.session) && finished(c.envelopes, now))
       .map((c) => ({ agentId, session: c.session, envelopes: c.envelopes })));
   }
 }

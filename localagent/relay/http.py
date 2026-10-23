@@ -67,6 +67,7 @@ def _handler(server):
                 agent_id, what, request_id = match.groups()
                 if method == "POST" and what == "tessera":
                     if not server.chat_limit.allow(self._client_ip()):
+                        self._discard(DISCARD_BYTES)
                         server.log_event("deliver", agent=agent_id, kind="envelope", bytes_in=0, bytes_out=0, ms=0,
                                          outcome="rate_limited")
                         return self._json(429, {"error": "too many messages; slow down"})
@@ -113,8 +114,10 @@ def _handler(server):
 
         def _inspection(self):
             if server.inbox is None:
+                self._discard(MAX_UPLOAD)
                 return self._send(404)
             if not server.upload_limit.allow(self._client_ip()):
+                self._discard(MAX_UPLOAD)
                 server.log_event("inspection", bytes=0, outcome="rate_limited")
                 return self._json(429, {"error": "too many uploads; slow down"})
             try:
@@ -143,6 +146,16 @@ def _handler(server):
                                           listed=data.get("listed", False), name=data.get("name", ""),
                                           description=data.get("description", ""), public=data.get("public", False))
             return self._json(200, {"token": token, "address": f"{self._base()}/a/{data['agent_id']}"})
+
+        def _discard(self, cap: int) -> None:
+            """Reads and drops a body we answer without using, so the client sees the answer instead of a reset
+            connection (closing with unread data resets it)."""
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            if 0 < length <= cap:
+                self.rfile.read(length)
 
         def _body(self, limit: int) -> bytes:
             try:

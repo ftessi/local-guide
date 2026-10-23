@@ -3,7 +3,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 
 import { utf8 } from "./b64.js";
-import { TesseraClient } from "./client.js";
+import { TesseraClient, agentAddress } from "./client.js";
 import { identityFromSeed } from "./envelope.js";
 import { NOTICE, sealUpload, upload } from "./inspection.js";
 import { Store } from "./store.js";
@@ -70,7 +70,7 @@ function agentInfo(agentId) {
   const live = agents.find((a) => a.id === agentId);
   const known = store.knownAgents()[agentId];
   return { name: live?.name || known?.name || agentId.slice(0, 8), description: live?.description ?? known?.description ?? "",
-    online: Boolean(live), address: live?.address };
+    online: Boolean(live) };
 }
 
 // ── Agents ─────────────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ function renderChat() {
 function clientFor(agentId) {
   let client = clients.get(agentId);
   if (!client) {
-    client = new TesseraClient({ identity, agentId, address: agentInfo(agentId).address });
+    client = new TesseraClient({ identity, agentId, address: agentAddress(location.origin, agentId) });
     client.onRecord = (session, envelopes) => {
       store.saveRecord(agentId, session, envelopes);
       if (selected === agentId) viewing = session;
@@ -221,10 +221,13 @@ async function sendForInspection() {
   if (sending) return;
   sending = true;
   try {
-    for (const chat of store.pendingUploads(new Date())) {
+    const all = [...clients.values()];
+    const now = all.length ? all[0].now() : new Date(); // the relay's time, as the clients keep it
+    const open = new Set(all.map((c) => c.sessionId).filter(Boolean));
+    for (const chat of store.pendingUploads(now, open)) {
       let raw;
       try {
-        raw = sealUpload(identity, { peer: chat.agentId, session: chat.session, envelopes: chat.envelopes, now: new Date() });
+        raw = sealUpload(identity, { peer: chat.agentId, session: chat.session, envelopes: chat.envelopes, now });
       } catch {
         continue; // too large to send; it stays here
       }
