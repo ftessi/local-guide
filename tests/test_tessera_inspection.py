@@ -212,3 +212,10 @@ def test_serve_sends_once_inspection_is_turned_on_later(tmp_path, monkeypatch):
         assert called.wait(5)
     finally:
         c.stop()
+
+
+def test_a_wrong_key_says_why():
+    raw = inspection.seal_upload(A, x25519_public(COMPANY), peer=B.agent_id, session="s-1",
+                                 envelopes=record("s-1"), now=NOW)
+    with pytest.raises(inspection.InspectionError, match=r"\(authentication failed\)"):
+        inspection.open_upload(x25519_from_seed(bytes(range(1, 33))), raw)

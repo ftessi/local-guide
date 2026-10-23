@@ -13,7 +13,7 @@ from localagent.protocol.tessera.chain import verify_record
 from localagent.protocol.tessera.envelope import EnvelopeError, format_time
 from localagent.protocol.tessera.seal import derive
 
-COMPANY_KEY = ""  # the public half from scripts/new_inspection_key.py; empty: inspection can't be turned on
+COMPANY_KEY = "YQupBjDaQOwZKuFfnN0co6ErN9PqksLi8hsYdajGMGs"  # the public half from scripts/new_inspection_key.py
 ASKER_NOTICE = ("Conversations are end-to-end encrypted. The other side's owner may send them to the relay operator "
                 "for security analysis.")
 MAX_UPLOAD = 4 * 1024 * 1024
@@ -56,7 +56,7 @@ def open_upload(private_key: X25519PrivateKey, raw: bytes) -> dict:
         aad = canonical({"tessera-inspection": 1, "e": package["e"]})
         payload = json.loads(ChaCha20Poly1305(key).decrypt(bytes(12), b64url_decode(package["ct"]), aad))
     except (InvalidTag, ValueError, TypeError, UnicodeDecodeError) as e:
-        raise InspectionError(f"this upload doesn't open with this key ({e or 'authentication failed'})") from None
+        raise InspectionError(f"this upload doesn't open with this key ({str(e) or 'authentication failed'})") from None
     if not isinstance(payload, dict) or set(payload) != PAYLOAD_FIELDS:
         raise InspectionError("the upload's content is malformed")
     signed = canonical({k: v for k, v in payload.items() if k != "sig"})
