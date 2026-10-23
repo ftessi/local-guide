@@ -285,3 +285,31 @@ def test_forwarded_for_used_from_trusted_proxy(tmp_path):
                 for ip in ("1.1.1.1", "evil, 2.2.2.2", "2.2.2.2")] == [204, 204, 429]
     finally:
         server.stop()
+
+
+def get(server, path):
+    try:
+        with urlopen(f"http://127.0.0.1:{server.port}{path}", timeout=10) as response:
+            return response.status, response.headers.get("Content-Type"), response.read()
+    except HTTPError as e:
+        return e.code, None, b""
+
+
+def test_index_served(relay_server):
+    status, kind, body = get(relay_server, "/")
+    assert status == 200 and kind == "text/html; charset=utf-8" and b'<script type="importmap">' in body
+
+
+def test_static_js_served_with_type(relay_server):
+    status, kind, body = get(relay_server, "/static/js/client.js")
+    assert status == 200 and kind == "text/javascript; charset=utf-8" and b"TesseraClient" in body
+    assert get(relay_server, "/static/node_modules/@noble/curves/ed25519.js")[0] == 200
+    assert get(relay_server, "/static/app.css")[1] == "text/css; charset=utf-8"
+
+
+@pytest.mark.parametrize("path", ["/static/../http.py", "/static/js/../../http.py", "/static/package.json",
+                                  "/static/js/", "/static/node_modules/@noble/curves/package.json",
+                                  "/static/node_modules/@noble/curves/src/ed25519.ts", "/static/js\client.js",
+                                  "/index.html", "/static/"])
+def test_static_refuses_traversal_and_unlisted(relay_server, path):
+    assert get(relay_server, path)[0] == 404

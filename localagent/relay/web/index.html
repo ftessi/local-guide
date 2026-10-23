@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tessera relay</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "@noble/curves/": "/static/node_modules/@noble/curves/",
+      "@noble/hashes/": "/static/node_modules/@noble/hashes/",
+      "@noble/ciphers/": "/static/node_modules/@noble/ciphers/"
+    }
+  }
+  </script>
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="side" aria-label="Agents">
+      <header class="brand">
+        <svg class="brand-mark" viewBox="0 0 3 3" aria-hidden="true">
+          <rect x="0" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/>
+          <rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1" class="lit"/>
+        </svg>
+        <h1>Tessera</h1>
+      </header>
+      <p class="side-intro">Talk to agents people have shared on this relay. No account needed.</p>
+      <ul class="agents" id="agents"></ul>
+      <p class="empty" id="no-agents" hidden>No public agents are connected right now. This list updates by itself.</p>
+      <footer class="me">
+        <p id="me"></p>
+        <p id="not-kept" hidden>History won't be kept in this browser.</p>
+      </footer>
+    </aside>
+
+    <main class="chat" id="chat">
+      <header class="chat-head">
+        <div class="chat-agent" id="chat-agent">
+          <p class="chat-pick">Choose an agent to start.</p>
+        </div>
+        <div class="chat-actions">
+          <details class="earlier" id="earlier" hidden>
+            <summary>Earlier chats</summary>
+            <ul id="earlier-list"></ul>
+          </details>
+          <button type="button" id="new-chat" disabled>New chat</button>
+        </div>
+      </header>
+
+      <p class="notice" id="notice" role="note"></p>
+
+      <ol class="messages" id="messages" aria-live="polite"></ol>
+
+      <form class="composer" id="composer">
+        <label class="visually-hidden" for="question">Your message</label>
+        <textarea id="question" rows="2" placeholder="Choose an agent first" disabled></textarea>
+        <div class="composer-row">
+          <span class="count" id="count"></span>
+          <button type="submit" id="send" disabled>Send</button>
+        </div>
+      </form>
+    </main>
+  </div>
+</body>
+</html>

@@ -24,6 +24,9 @@ from localagent.relay.log import RelayLog
 log = logging.getLogger(__name__)
 MAX_REGISTER_BYTES = 4096
 DISCARD_BYTES = 1 << 20  # a too-large body up to this size is read and dropped, so the client sees the 413
+WEB = Path(__file__).resolve().parent / "web"
+CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                 ".css": "text/css; charset=utf-8"}
 AGENT_ROUTE = re.compile(r"/a/([A-Za-z0-9_-]{43})/(tessera|tessera/card|next|reply/([0-9a-f]{16}))")
 STATUS = {Offline: 503, Busy: 503, Full: 503, TimedOut: 504, BadToken: 401, Refused: 401}
 
@@ -48,6 +51,8 @@ def _handler(server):
             path = urlsplit(self.path).path
             relay = server.relay
             try:
+                if method == "GET" and (path == "/" or path.startswith("/static/")):
+                    return self._static(path)
                 if method == "GET" and path == "/relay/challenge":
                     return self._json(200, {"nonce": relay.challenge()})
                 if method == "POST" and path == "/relay/register":
@@ -152,6 +157,19 @@ def _handler(server):
                 raise _BadRequest(413, f"larger than {limit} bytes")
             return self.rfile.read(length)
 
+        def _static(self, path: str):
+            """The browser page: only the files listed when the relay started, by exact path."""
+            found = server.static.get("index.html" if path == "/" else path[len("/static/"):])
+            if found is None:
+                return self._send(404)
+            data = found.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", CONTENT_TYPES[found.suffix])
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+
         def _client_ip(self) -> str:
             """The visitor's address. Behind the operator's own proxy (--trusted-proxy), the last X-Forwarded-For
             entry: the one that proxy added; earlier entries are whatever the visitor sent."""
@@ -186,6 +204,17 @@ def _handler(server):
     return Handler
 
 
+def web_files(root: Path = WEB) -> dict[str, Path]:
+    """Published path -> file: the page, its own scripts and styles, and the vendored libraries' JavaScript."""
+    files = {"index.html": root / "index.html", "app.css": root / "app.css"}
+    files.update({f"js/{p.name}": p for p in (root / "js").glob("*.js")})
+    for package in ("curves", "hashes", "ciphers"):
+        base = root / "node_modules" / "@noble" / package
+        files.update({p.relative_to(root).as_posix(): p for p in base.rglob("*.js")
+                      if "src" not in p.relative_to(base).parts})
+    return {name: path for name, path in files.items() if path.is_file()}
+
+
 class RelayServer:
     def __init__(self, relay: Relay, host: str = "127.0.0.1", port: int = 8200, *, public_url: str | None = None,
                  deliver_timeout: float = 300.0, card_timeout: float = 30.0, poll_wait: float = 25.0,
@@ -199,6 +228,7 @@ class RelayServer:
         self.log, self.inbox, self.inbox_bytes = log, (Path(inbox) if inbox else None), inbox_bytes
         self._inbox_lock = threading.Lock()
         self.trusted_proxy = trusted_proxy
+        self.static = web_files()
         self.chat_limit, self.upload_limit = RateLimiter(chat_per_minute), RateLimiter(uploads_per_minute)
         if log is not None:
             relay.on_event = self.log_event
