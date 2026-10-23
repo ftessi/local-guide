@@ -140,6 +140,7 @@ connections:
     relay: https://relay.example.com
     listed: true                         # optional: appear in the relay's public list (default: not listed)
     description: "Questions about contract v3"   # optional, shown in that list next to the agent's name
+    public: true                         # optional: anyone who comes through the relay may ask (default: off)
 ```
 
 Without `host:`/`port:` no port is opened; add them to be reachable directly too. Start it as usual
@@ -150,7 +151,25 @@ reconnects by itself if the relay goes away. Give the other owner that address a
 **On their side** nothing changes: `connect <the relay address> <your id> --name acme --purpose "..."`, then `ask`,
 `/ask` or `/talk`.
 
-**The list:** `GET <relay>/agents` shows the listed agents that are connected now (id, name, description, address).
+**The list:** `GET <relay>/agents` shows the listed agents that are connected now (id, name, description, address,
+and whether they are public).
+
+**Public agents:** with `public: true`, an agent answers anyone who reaches it through the relay, at level 1 (Ask),
+without you accepting each one: people in a browser (below) and other agents alike. It needs `relay:`. Your direct
+address (`host:`/`port:`) still answers only accepted peers. Someone you rejected or removed (`peers reject`,
+`peers remove`) stays refused, public or not, from their next message on. The connection's adapter remains the
+gate: without one, a public agent refuses everything too. Each public visitor gets their own peer memory and records
+on your side, kept like any other peer's; the audit log marks these sessions `public=True`.
+
+**The browser page:** open the relay's address (`https://relay.example.com/`) in any browser. The list on the left
+shows the public agents connected now; pick one and type. There is no sign-in: on the first visit the browser makes
+its own Tessera key and keeps it, so an agent sees the same visitor on every visit. The browser does Tessera itself,
+end-to-end encrypted like any agent, so the relay reads nothing. Chats are kept in that browser only (its local
+storage); clearing the site's data starts fresh. Every finished chat (ended with **New chat**, closed with the tab,
+or past its expiry) is signed by the browser, sealed to the company's key and sent to the relay's inbox, and the
+page says so above every chat: *Chats are end-to-end encrypted: the relay can't read them. A sealed copy of every
+chat is sent to the Tessera company for security inspection.* An agent's own inspection mode skips these chats, so
+they aren't sent twice.
 
 **Running a relay** (any small server; standard library only):
 
@@ -160,13 +179,19 @@ python -m localagent relay --host 0.0.0.0 --port 8200 --public-url https://relay
 
 Put HTTPS in front of it (a reverse proxy or a tunnel, page 4). `--max-agents` (default 100) limits how many agents
 are connected at once; each agent can have 8 questions waiting. Anyone holding an agent's key can connect that agent;
-there are no accounts yet.
+there are no accounts yet. Each visitor's address may send 30 messages a minute (all agents together) and 10
+inspection uploads a minute; beyond that the relay answers 429 and the page asks them to slow down. Behind your own
+proxy, add `--trusted-proxy <the proxy's address>`: the visitor's address is then read from the `X-Forwarded-For`
+header the proxy adds; without the option that header is ignored.
 
 **What the relay can and can't do:** it can't read messages (they are end-to-end encrypted), can't change or forge
 one, can't pretend to be your agent (connecting needs your agent's key), can't skip your acceptance or the adapter,
 and doesn't learn who is asking (that is inside the encrypted first message). It sees which agent is reached, when,
 and how many bytes, and it can delay or drop messages. It keeps exactly that metadata in `connections.jsonl` in its
-data folder (`--data-dir`, default `relay-data`; `--log-days`, default 90) and nothing else.
+data folder (`--data-dir`, default `relay-data`; `--log-days`, default 90) and nothing else. The relay also serves
+the browser page, so a relay you don't trust could serve altered code to browsers: use a relay you trust, over
+HTTPS. The page's crypto libraries (`localagent/relay/web/node_modules/@noble/`) are exactly the npm releases pinned
+in `package-lock.json`, and the page loads nothing from anywhere else.
 
 ## Records
 
@@ -248,6 +273,12 @@ earlier conversations to a local relay's inbox; none held the secret in plain te
 All 17 opened with the company's private key, signed by the agent; the latest was identical to the agent's own
 record (11 messages). Another key was refused. After `inspection off`, the count of sent conversations stayed at 17.
 
+Browser chat, 2026-10-23, same computer, with a fake model: a local relay with one public agent. Headless Chrome
+listed it, asked two questions and got both answers, showed the chat again after a reload, and after **New chat**
+sent the chat to the inbox. The company's private key opened that upload (signed by the browser's key, the full
+record); the sealed file didn't contain the question in plain text. Light and dark themes and a 375-pixel-wide
+window were checked. The real model and a person's browser on another computer are still to do.
+
 **Not yet tested:** two separate computers over a real network (the commands are exactly the ones above, with
 `host: 0.0.0.0`).
 
@@ -257,7 +288,8 @@ record (11 messages). Another key was refused. After `inspection off`, the count
   Protecting them with a passphrase or the operating system's key store is planned.
 - **Metadata stays visible:** a relay or the network sees which agent is reached, when and how much; HTTPS in front
   of a relay hides it from the network, not from the relay.
-- **No rate limiting.** A stranger can make `tessera/requests.jsonl` grow by connecting with many new keys.
+- **Rate limits are per address, on the relay only.** A stranger can make `tessera/requests.jsonl` grow by
+  connecting directly with many new keys, and every new browser key on a public agent adds a peer memory folder.
 - **Records can differ by one final question:** if the answering side rejects a question (an error reply), the
   asking side has it in its record and the answering side doesn't.
 - An open model can be wrong. Its answers are not binding, and only what you trained into the connection's adapter

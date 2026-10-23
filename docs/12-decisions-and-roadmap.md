@@ -17,6 +17,7 @@ step-by-step implementation plans these were taken from are in the git history (
 | 2026-10-13 | llama.cpp backend: 3B model 18× faster on the GTX 1050, CPU 4–5× faster; the same adapters work on both backends |
 | 2026-10-19 | Tessera relay: agents reachable without sharing an address, many at once, opt-in directory |
 | 2026-10-23 | Tessera v0.2: end-to-end encryption, records encrypted at rest, metadata-only relay, inspection mode |
+| 2026-10-23 | The relay's browser page: anyone chats with public agents, encrypted in the browser, every chat inspected |
 
 ## Core decisions
 
@@ -63,6 +64,10 @@ step-by-step implementation plans these were taken from are in the git history (
 | 17 | **Records encrypted at rest** with a per-agent key | A copy of the records alone reveals nothing. |
 | 18 | **The relay keeps metadata only** | Nothing worth stealing on the relay; data minimisation. |
 | 19 | **Inspection mode**: owners send finished conversations sealed to the company key; the company keeps findings, not conversations | Security analysis with the owner's consent, without the relay reading anything. |
+| 20 | **The browser does Tessera itself** (JavaScript on vendored audited libraries, a key made in the browser, no sign-in) | The relay still reads nothing; a relay asking on the user's behalf would break that promise. |
+| 21 | **Every browser chat is inspected** for the proof of concept, with the notice shown before the first message | The interactions are what improves the security agent. Turning it off comes later, with accounts. |
+| 22 | **`public:` is its own switch**, separate from `listed:`, in the agent's configuration; a rejected peer stays refused | Owners decide who may answer strangers without accounts; being listed doesn't open an agent to everyone. |
+| 23 | **Visitor data is kept** like any peer's (peer memory, records); chat history stays in the browser | Managing agents and their data is the service the company offers later. |
 
 ## Decisions of the llama.cpp backend
 
@@ -102,6 +107,7 @@ never letting adapter files leave your machine.
 - The **relay** (`python -m localagent relay`): agents reachable without sharing an address, an opt-in directory.
 - Tessera v0.2: end-to-end encryption, records encrypted at rest (`records`), a metadata-only relay, and inspection
   mode with the company's inspection key (page 8).
+- The relay's **browser page** and **public agents** (`public: true`), with per-visitor limits on the relay (page 8).
 - Installs on any computer: per-platform PyTorch, then `requirements.txt` (or `requirements-nvidia.txt`).
 - The extensions repository (phone app, calendar, tunnel) is public at
   https://github.com/ftessi/local-guide-extensions; agents install from it with `source:` + `path:`.
@@ -116,7 +122,9 @@ never letting adapter files leave your machine.
 - **Publish** `tessera-protocol`.
 
 **Then:**
-- On top of the relay: a **browser front end** for people without an agent, accounts, rate limits, persistence.
+- In the browser, next: a **workspace with several agents at once** (like an app with sub-agents), then a
+  **public API** so people's own workflows and local agents can load listed agents; later accounts, turning
+  inspection off, and per-agent context limits based on each model and its hardware.
 - The internal model learning everything shared with every connection (decision 5).
 - Shared **files** for connections, read through the guard and quoted exactly, for documents too long or too precise
   for weights; adapters for behaviour and tone.
