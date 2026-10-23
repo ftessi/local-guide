@@ -40,8 +40,9 @@ Tessera v0.1 implements **level 1, Ask**:
   model answering them is treated as if they control it, so everything they must not get is simply not reachable
   from their session.
 - If the connection's adapter is missing, every question gets a decline: they never reach the bare model.
-- Every message, both ways, is signed by its sender and linked to the previous one. Both sides keep the same record,
-  so neither can later deny or alter what was said.
+- Every message, both ways, is signed by its sender, linked to the previous one, and **end-to-end encrypted**: only
+  your Tessera-facing agent and theirs can read it. Both sides keep the same record, encrypted on their own disk, so
+  neither can later deny or alter what was said.
 
 Levels are granted by you, never negotiated up by the agents:
 
@@ -115,7 +116,8 @@ python -m localagent ask acme "What is the delivery deadline in contract v3?"
 
 Until they accept you, you see `Not connected: acme hasn't accepted this agent (or isn't reachable).` Answers print
 as `acme says:` followed by indented lines, so text from another agent can never pass for your own agent's output;
-control characters in it are shown escaped.
+control characters in it are shown escaped. `connect` and `/talk` remind you: *Conversations are end-to-end
+encrypted. The other side's owner may send them to the relay operator for security analysis.*
 
 Inside `chat`, `/ask acme <question>` asks one question. `/talk acme` starts a conversation: everything you type goes
 to `acme` (the prompt shows `You -> acme:`) until `/back`. It remembers the conversation until the Tessera session
@@ -160,21 +162,49 @@ Put HTTPS in front of it (a reverse proxy or a tunnel, page 4). `--max-agents` (
 are connected at once; each agent can have 8 questions waiting. Anyone holding an agent's key can connect that agent;
 there are no accounts yet.
 
-**What the relay can and can't do:** it can't change a message or forge one (every message is signed and chained),
-can't pretend to be your agent (connecting needs your agent's key), and can't skip your acceptance or the adapter
-(your agent checks them). It **can** read the messages (until end-to-end encryption in v0.2), see who talks to whom
-and when, and delay or drop messages.
+**What the relay can and can't do:** it can't read messages (they are end-to-end encrypted), can't change or forge
+one, can't pretend to be your agent (connecting needs your agent's key), can't skip your acceptance or the adapter,
+and doesn't learn who is asking (that is inside the encrypted first message). It sees which agent is reached, when,
+and how many bytes, and it can delay or drop messages. It keeps exactly that metadata in `connections.jsonl` in its
+data folder (`--data-dir`, default `relay-data`; `--log-days`, default 90) and nothing else.
 
 ## Records
 
-Each side keeps one file per session: `tessera/<other agent's id>/<session>.jsonl`, every message signed and
-chained. To check that two records match and nothing was altered:
+Each side keeps one file per session, `tessera/<other agent's id>/<session>.jsonl`, every line encrypted with the
+agent's record key (`identity/record.key`). Read them with:
 
 ```bash
-python -c "import json,sys; from localagent.protocol.tessera.chain import verify_record; a=[json.loads(l) for l in open(sys.argv[1],encoding='utf-8')]; b=[json.loads(l) for l in open(sys.argv[2],encoding='utf-8')]; verify_record(a); print('identical' if a==b else 'DIFFERENT')" <your file> <their file>
+python -m localagent records --agent tessera-acme                    # sessions
+python -m localagent records show <session> --agent tessera-acme     # the conversation
+python -m localagent records verify <session> --agent tessera-acme   # signatures and chain
+python -m localagent records export <session> --to mine.jsonl --agent tessera-acme
 ```
 
-Changing a single character in either file makes `verify_record` fail with a signature error.
+To check that two records match, each owner exports the session and they compare the two exports:
+
+```bash
+python -c "import json,sys; from localagent.protocol.tessera.chain import verify_record; a=[json.loads(l) for l in open(sys.argv[1],encoding='utf-8')]; b=[json.loads(l) for l in open(sys.argv[2],encoding='utf-8')]; verify_record(a); print('identical' if a==b else 'DIFFERENT')" mine.jsonl theirs.jsonl
+```
+
+Changing a single character in an export makes `verify_record` fail with a signature error. An export is decrypted:
+keep it private. Records written before v0.2 are encrypted in place the first time the agent runs.
+
+## Inspection mode
+
+The relay operator never stores conversations. An owner who wants a conversation checked for security threats turns
+on inspection mode:
+
+```bash
+python -m localagent inspection on --agent tessera-acme      # --relay <address> if relay: isn't set
+python -m localagent inspection --agent tessera-acme         # on or off, and how many were sent
+python -m localagent inspection off --agent tessera-acme
+```
+
+While it is on, every finished conversation of that agent (closed, or past its expiry), including the other side's
+messages, is signed by the agent, sealed to the company's public key (built into LocalAgent) and sent to the relay's
+inbox. Turning it on also sends every earlier conversation once. The relay can't open uploads; the company's security
+agent opens them with an offline private key, keeps only security findings, and deletes the upload. What was sent
+stays analysed if the owner turns inspection off later.
 
 ## Results so far
 
@@ -199,14 +229,23 @@ http://127.0.0.1:8200`, no port open; `/agents` listed it with its description),
 `/talk demo` at the relay address. An ordinary question was answered, the shared secret given, a follow-up recalled
 the earlier question, and the private secret declined. Both records (11 messages) were identical and verified.
 
+Tessera v0.2, 2026-10-23, same computer, through the local relay: `tessera-demo` got its new keys on the first run
+and its old plaintext records were encrypted in place. `connect` and `/talk demo` showed the inspection notice; an
+ordinary question was answered, the shared secret given, a follow-up recalled the earlier question, and the private
+secret declined. `records verify` passed on both sides, both exports (11 messages) were identical, and no file on
+either side contained the secret in plain text. The relay's `connections.jsonl` held only metadata (registrations and
+deliveries with sizes and timing): no content, and not who asked.
+
 **Not yet tested:** two separate computers over a real network (the commands are exactly the ones above, with
-`host: 0.0.0.0`).
+`host: 0.0.0.0`); inspection mode end to end, which waits for the company key (until it is set, `inspection on`
+says so and nothing is sent).
 
-## Known limitations of v0.1
+## Known limitations
 
-- **No encryption built in.** Messages are signed (nobody can alter them) but readable on the way. Use HTTPS (a
-  tunnel or reverse proxy, page 4) across the internet. End-to-end encryption is planned for v0.2.
-- **A relay can read what passes through it** (see "Through a relay"); only end-to-end encryption (v0.2) will fix that.
+- **Keys at rest are plain files** in `identity/`: anyone who copies the whole agent folder can read its records.
+  Protecting them with a passphrase or the operating system's key store is planned.
+- **Metadata stays visible:** a relay or the network sees which agent is reached, when and how much; HTTPS in front
+  of a relay hides it from the network, not from the relay.
 - **No rate limiting.** A stranger can make `tessera/requests.jsonl` grow by connecting with many new keys.
 - **Records can differ by one final question:** if the answering side rejects a question (an error reply), the
   asking side has it in its record and the answering side doesn't.
