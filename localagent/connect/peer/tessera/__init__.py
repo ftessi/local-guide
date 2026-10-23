@@ -142,7 +142,7 @@ def check_tessera_folder(config) -> list[str]:
 
 class TesseraConnection(Connection):
     name = "tessera"
-    options = ("builtin", "host", "port", "relay", "listed", "description")
+    options = ("builtin", "host", "port", "relay", "listed", "description", "public")
 
     def setup(self, ctx) -> None:
         problems = check_tessera_folder(ctx.config)
@@ -176,6 +176,12 @@ class TesseraConnection(Connection):
             raise SetupError("connections.tessera.relay must be the relay's address, like https://relay.example.com")
         if not isinstance(listed, bool) or not isinstance(description, str):
             raise SetupError("connections.tessera: `listed` must be true or false and `description` a text")
+        public = settings.get("public", False)
+        if not isinstance(public, bool):
+            raise SetupError("connections.tessera: `public` must be true or false")
+        if public and not relay:
+            raise SetupError("connections.tessera: `public` needs `relay:` (strangers reach a public agent only "
+                             "through a relay)")
         self.server = None
         if not relay or "host" in settings or "port" in settings:  # without a relay: direct, exactly as before
             host, port = str(settings.get("host", "127.0.0.1")), int(settings.get("port", 8100))
@@ -187,8 +193,12 @@ class TesseraConnection(Connection):
         self.link = None
         if relay:
             from localagent.connect.peer.tessera.relay_link import RelayLink
-            self.link = RelayLink(self.endpoint, identity, relay, name=ctx.config.name, listed=listed,
-                                  description=description, audit=ctx.protocol.audit)
+            link_endpoint = self.endpoint
+            if public:  # its own endpoint: the direct server keeps per-peer acceptance only
+                link_endpoint = SealedEndpoint(TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
+                                                               kx_public=x25519_public(kx), public=True), kx)
+            self.link = RelayLink(link_endpoint, identity, relay, name=ctx.config.name, listed=listed,
+                                  description=description, public=public, audit=ctx.protocol.audit)
         self.agent_id = identity.agent_id
         self.agent_dir, self.protocol, self.identity = ctx.config.agent_dir, ctx.protocol, identity
         self._stop_inspection = threading.Event()

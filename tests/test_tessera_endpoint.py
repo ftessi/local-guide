@@ -258,3 +258,57 @@ def test_a_hello_whose_one_time_key_differs_from_the_package_is_refused(side):
     ask = next_env(chain, "ask", {"text": "q"})
     reply = decode(side.endpoint.handle(encode(ask), e=EKEY, f=KX), side.clock())
     assert reply["type"] == "error" and reply["body"]["code"] == "malformed"  # a hello package carries only a hello
+
+
+# ── Public mode: strangers through the relay ───────────────────────────────
+
+@pytest.fixture
+def public_side(side):
+    side.endpoint = TesseraEndpoint(A, side.protocol, side.endpoint.agent, name="Ana's agent", kx_public=KX,
+                                    clock=side.clock, max_asks=2, max_ask_chars=50, public=True)
+    return side
+
+
+def public_session(side, who=B):
+    h = hello(who)
+    w = send(side, h)
+    chain = Chain()
+    chain.append(h)
+    chain.append(w)
+    return w, chain
+
+
+def test_public_endpoint_welcomes_strangers(public_side):
+    w, _ = public_session(public_side)
+    assert w["type"] == "welcome" and w["body"]["granted_level"] == 1
+    assert public_side.protocol.public_sessions() == {f"{B.agent_id}/{w['body']['session']}"}
+    assert public_side.protocol.requests() == []
+
+
+def test_non_public_endpoint_still_refuses_strangers(side):
+    assert send(side, hello())["type"] == "refuse"
+    assert [r["id"] for r in side.protocol.requests()] == [B.agent_id]
+    assert side.protocol.public_sessions() == set()
+
+
+def test_public_endpoint_refuses_rejected_peer(public_side):
+    public_side.protocol.reject_request(B.agent_id)
+    assert send(public_side, hello())["type"] == "refuse"
+
+
+def test_accepted_peer_on_public_endpoint_is_not_a_public_session(public_side):
+    w, _ = open_session(public_side)
+    assert w["type"] == "welcome" and public_side.protocol.public_sessions() == set()
+
+
+def test_public_session_ask_answered_and_rejection_applies_mid_session(public_side):
+    public_side.backend.replies = ["Hi there.", "Again."]
+    w, chain = public_session(public_side)
+    ask = next_env(chain, "ask", {"text": "Hello?"})
+    reply = send(public_side, ask)
+    assert reply["type"] == "answer" and reply["body"]["text"] == "Hi there."
+    chain.append(ask)
+    chain.append(reply)
+    public_side.protocol.reject_request(B.agent_id)
+    reply = send(public_side, next_env(chain, "ask", {"text": "Still there?"}))
+    assert reply["type"] == "error" and reply["body"]["code"] == "not_allowed"

@@ -126,3 +126,23 @@ def test_relay_and_direct_together(tmp_path, relay_server):
 def test_bad_relay_settings_are_setup_errors(tmp_path, settings):
     with pytest.raises(SetupError, match="connections.tessera"):
         tessera(tmp_path, "connections:\n  tessera:\n    builtin: true\n" + settings)
+
+
+@pytest.mark.parametrize("settings, why", [
+    ("    relay: https://r.example\n    public: yes please\n", "`public` must be true or false"),
+    ("    public: true\n", "`public` needs `relay:`"),
+])
+def test_bad_public_settings_are_setup_errors(tmp_path, settings, why):
+    with pytest.raises(SetupError, match=why):
+        tessera(tmp_path, "connections:\n  tessera:\n    builtin: true\n" + settings)
+
+
+def test_public_relay_uses_separate_public_endpoint(tmp_path, relay_server):
+    *_, conn = tessera(tmp_path, f"connections:\n  tessera:\n    builtin: true\n    port: 0\n"
+                                 f"    relay: http://127.0.0.1:{relay_server.port}\n    public: true\n")
+    try:
+        assert conn.server is not None and conn.endpoint.endpoint.public is False  # the direct one
+        assert conn.link.endpoint is not conn.endpoint
+        assert conn.link.endpoint.endpoint.public is True and conn.link.public is True
+    finally:
+        conn.stop()

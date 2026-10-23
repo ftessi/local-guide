@@ -48,15 +48,17 @@ class _Session:
     chain: Chain
     history: list = field(default_factory=list)
     closed: bool = False
+    public: bool = False  # granted by public mode, not by the owner's acceptance
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class TesseraEndpoint:
     def __init__(self, identity, protocol, agent, *, name: str, kx_public: str, clock=utc_now, session_seconds: int = 3600,
-                 max_asks: int = 50, max_ask_chars: int = 1000):
+                 max_asks: int = 50, max_ask_chars: int = 1000, public: bool = False):
         self.identity, self.protocol, self.agent, self.name, self.clock = identity, protocol, agent, name, clock
         self.kx_public = kx_public  # the card names it; SealedEndpoint holds the private half
         self.session_seconds, self.max_asks, self.max_ask_chars = session_seconds, max_asks, max_ask_chars
+        self.public = public  # strangers get level 1 (only the relay link's endpoint is public)
         self._sessions: dict[str, _Session] = {}
         self._lock = threading.Lock()
 
@@ -112,8 +114,12 @@ class TesseraEndpoint:
             return self.error("malformed", peer)
         f = f or x25519_public(X25519PrivateKey.generate())
         grant = self.protocol.peer_grant(peer, body["requested_level"])
-        if grant is None:
-            self.protocol.record_request(peer, body["purpose"], body["requested_level"])
+        public = grant is None and self.public
+        if public:
+            grant = self.protocol.public_grant(peer)
+        if grant is None:  # a public agent still refuses an id its owner rejected, without queueing it
+            if not public:
+                self.protocol.record_request(peer, body["purpose"], body["requested_level"])
             self.protocol.audit.log("tessera_refused", peer=peer)
             return encode(self._sign("refuse", to=peer, seq=1, prev=envelope_hash(hello), body={"f": f}))
         sid = "s-" + secrets.token_hex(8)
@@ -124,12 +130,16 @@ class TesseraEndpoint:
         # Records first: if either write fails, no session exists and the peer gets `unavailable`.
         self.protocol.record_envelope(peer, sid, hello)
         self.protocol.record_envelope(peer, sid, welcome)
-        self.protocol.audit.log("tessera_session", peer=peer, session=sid, level=grant.level)
+        if public:
+            self.protocol.mark_public_session(peer, sid)
+            self.protocol.audit.log("tessera_session", peer=peer, session=sid, level=grant.level, public=True)
+        else:
+            self.protocol.audit.log("tessera_session", peer=peer, session=sid, level=grant.level)
         chain = Chain()
         chain.append(hello)
         chain.append(welcome)
         with self._lock:
-            self._sessions[sid] = _Session(sid, peer, grant.level, expires, self.max_asks, chain)
+            self._sessions[sid] = _Session(sid, peer, grant.level, expires, self.max_asks, chain, public=public)
         return encode(welcome)
 
     def _in_session(self, s: _Session, env: dict) -> bytes:
@@ -160,7 +170,8 @@ class TesseraEndpoint:
         if s.asks_left <= 0 or len(text) > self.max_ask_chars:
             return self.error("limit", s.peer)
         try:
-            peer_session = self.protocol.open_peer_session(s.peer)  # re-checked every time: removal applies at once
+            # re-checked every time: removal or rejection applies at once
+            peer_session = self.protocol.open_peer_session(s.peer, public=s.public)
         except AuthError:
             s.closed = True
             return self.error("not_allowed", s.peer)

@@ -219,3 +219,12 @@ def test_a_wrong_key_says_why():
                                  envelopes=record("s-1"), now=NOW)
     with pytest.raises(inspection.InspectionError, match=r"\(authentication failed\)"):
         inspection.open_upload(x25519_from_seed(bytes(range(1, 33))), raw)
+
+
+def test_inspection_sender_skips_public_sessions(tmp_path):
+    d, me, p = agent(tmp_path, {"s-1": {}, "s-2": {}})
+    p.mark_public_session(B.agent_id, "s-2")
+    inspection_sender.save_state(d, {"enabled": True, "relay": "http://r", "sent": []})
+    sent = []
+    assert inspection_sender.send_finished(d, p, me, post=lambda relay, raw, **kw: sent.append(raw)) == 1
+    assert inspection.open_upload(COMPANY, sent[0])["session"] == "s-1"
