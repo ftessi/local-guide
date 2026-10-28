@@ -1,4 +1,5 @@
-// What the page keeps in this browser (localStorage only): its Tessera identity and, per agent, the chats' records.
+// What the page keeps in this browser (localStorage only): its Tessera identity, its workspace (agents and lead)
+// and, per agent, the chats' records.
 // Without usable storage everything still works for this tab; `persistent` tells the page history won't be kept.
 import { fromHex, toHex } from "./b64.js";
 import { finished } from "./inspection.js";
@@ -6,6 +7,8 @@ import { finished } from "./inspection.js";
 const IDENTITY = "tessera.identity";
 const CHATS = "tessera.chats.";
 const AGENTS = "tessera.agents";
+const WORKSPACE = "tessera.workspace";
+const AGENT_ID = /^[A-Za-z0-9_-]{43}$/;
 
 function openStorage(storage) {
   try {
@@ -111,10 +114,12 @@ export class Store {
     }
   }
 
-  rememberAgent(agentId, { name, description }) {
+  /** `listed`: seen in the public directory (gone from it later means offline); agents added by id don't have it. */
+  rememberAgent(agentId, { name, description, listed }) {
     const known = this.knownAgents();
-    if (known[agentId]?.name === name && known[agentId]?.description === description) return;
-    this._set(AGENTS, JSON.stringify({ ...known, [agentId]: { name, description } }));
+    const entry = listed ? { name, description, listed: true } : { name, description };
+    if (JSON.stringify(known[agentId]) === JSON.stringify(entry)) return;
+    this._set(AGENTS, JSON.stringify({ ...known, [agentId]: entry }));
   }
 
   /** Newest first: [{session, envelopes, inspected, started}]. */
@@ -138,6 +143,63 @@ export class Store {
 
   markInspected(agentId, session) {
     this._saveChats(agentId, this.chats(agentId).map((c) => (c.session === session ? { ...c, inspected: true } : c)));
+  }
+
+  /** The agents this person keeps on the board, and the one their questions go to first (the lead). */
+  workspace() {
+    try {
+      const saved = JSON.parse(this._get(WORKSPACE) || "{}");
+      const agents = Array.isArray(saved.agents) ? saved.agents.filter((id) => AGENT_ID.test(id)) : [];
+      return { agents, lead: agents.includes(saved.lead) ? saved.lead : null };
+    } catch {
+      return { agents: [], lead: null };
+    }
+  }
+
+  _saveWorkspace(workspace) {
+    this._set(WORKSPACE, JSON.stringify(workspace));
+  }
+
+  addToWorkspace(agentId) {
+    const ws = this.workspace();
+    if (AGENT_ID.test(agentId) && !ws.agents.includes(agentId)) this._saveWorkspace({ ...ws, agents: [...ws.agents, agentId] });
+  }
+
+  removeFromWorkspace(agentId) {
+    const ws = this.workspace();
+    this._saveWorkspace({ agents: ws.agents.filter((id) => id !== agentId), lead: ws.lead === agentId ? null : ws.lead });
+  }
+
+  setLead(agentId) {
+    const ws = this.workspace();
+    if (ws.agents.includes(agentId)) this._saveWorkspace({ ...ws, lead: agentId });
+  }
+
+  /** The latest thing that happened with an agent: this person's own question to it, or a question a lead asked it
+   * in one of this person's chats (`by` is that lead). Null when nothing has. */
+  lastExchange(agentId) {
+    let latest = null;
+    const consider = (by, text, time) => {
+      const when = Date.parse(time);
+      if (!Number.isNaN(when) && (!latest || when > latest.at)) latest = { by, text: typeof text === "string" ? text : "", at: when };
+    };
+    for (const chat of this.chats(agentId)) {
+      for (const env of chat.envelopes) if (env?.type === "ask") consider(null, env.body?.text, env.time);
+    }
+    for (const leadId of this._agents()) {
+      for (const chat of this.chats(leadId)) {
+        for (const env of chat.envelopes) {
+          if (env?.type !== "answer" || !Array.isArray(env.body?.calls)) continue;
+          for (const call of env.body.calls) if (call?.agent === agentId) consider(leadId, call.ask?.body?.text, env.time);
+        }
+      }
+    }
+    return latest;
+  }
+
+  /** Milliseconds since the epoch of the latest exchange, 0 for none: the board's "Latest" order. */
+  lastActivity(agentId) {
+    return this.lastExchange(agentId)?.at ?? 0;
   }
 
   /** Finished chats not yet sent for inspection, from every agent; never a session a client still holds open. */

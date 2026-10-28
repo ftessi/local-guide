@@ -17,8 +17,8 @@
   <script type="module" src="/static/js/app.js"></script>
 </head>
 <body>
-  <div class="app">
-    <aside class="side" aria-label="Agents">
+  <div class="app" id="app" data-view="board">
+    <aside class="side" aria-label="Your workspace">
       <header class="brand">
         <svg class="brand-mark" viewBox="0 0 3 3" aria-hidden="true">
           <rect x="0" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/>
@@ -26,17 +26,45 @@
         </svg>
         <h1>Tessera</h1>
       </header>
-      <p class="side-intro">Talk to agents people have shared on this relay. No account needed.</p>
-      <ul class="agents" id="agents"></ul>
-      <p class="empty" id="no-agents" hidden>No public agents are connected right now. This list updates by itself.</p>
+
+      <div class="board-bar">
+        <p id="lead-line" class="lead-line"></p>
+        <button type="button" id="add-agent" aria-expanded="false" aria-controls="add-panel">+ Add agent</button>
+      </div>
+
+      <section class="add-panel" id="add-panel" hidden aria-label="Add an agent">
+        <h2>Public agents</h2>
+        <ul class="directory" id="directory"></ul>
+        <p class="empty" id="no-directory" hidden>No other public agents are connected right now.</p>
+        <form class="add-by-id" id="add-by-id">
+          <label for="add-id">Or add one by its agent id</label>
+          <div class="add-row">
+            <input id="add-id" autocomplete="off" spellcheck="false" placeholder="43 characters">
+            <button type="submit">Add</button>
+          </div>
+          <p class="add-error" id="add-error" role="alert"></p>
+        </form>
+      </section>
+
+      <div class="board" id="board">
+        <h2 class="group" id="running-head" hidden>Running</h2>
+        <ul class="cards" id="running"></ul>
+        <h2 class="group" id="latest-head" hidden>Latest</h2>
+        <ul class="cards" id="latest"></ul>
+        <p class="empty" id="empty-workspace" hidden>Your workspace is empty. Add an agent to start talking.</p>
+      </div>
+
       <footer class="me">
-        <p id="me"></p>
+        <p class="me-id"><span>Your id</span> <code id="me"></code>
+          <button type="button" id="copy-id" class="small">Copy</button></p>
+        <p>An agent's owner can accept this id to let you reach a private agent.</p>
         <p id="not-kept" hidden>History won't be kept in this browser.</p>
       </footer>
     </aside>
 
     <main class="chat" id="chat">
       <header class="chat-head">
+        <button type="button" class="back small" id="back">← Workspace</button>
         <div class="chat-agent" id="chat-agent">
           <p class="chat-pick">Choose an agent to start.</p>
         </div>

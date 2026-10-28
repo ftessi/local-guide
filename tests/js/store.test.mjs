@@ -110,3 +110,44 @@ test("a chat that grows after inspection is pending again, and open sessions are
   assert.deepEqual(store.pendingUploads(NOW).map((p) => p.session), ["s-1"]);
   assert.deepEqual(store.pendingUploads(NOW, new Set(["s-1"])), []); // still held open by a client
 });
+
+test("workspace starts empty", () => {
+  assert.deepEqual(new Store(new FakeStorage()).workspace(), { agents: [], lead: null });
+});
+
+test("add, lead, remove", () => {
+  const storage = new FakeStorage();
+  const store = new Store(storage);
+  store.addToWorkspace(AGENT);
+  store.addToWorkspace(OTHER);
+  store.addToWorkspace(AGENT); // once only
+  store.addToWorkspace("not an id");
+  store.setLead(OTHER);
+  store.setLead("C".repeat(43)); // not in the workspace: ignored
+  assert.deepEqual(new Store(storage).workspace(), { agents: [AGENT, OTHER], lead: OTHER });
+  store.removeFromWorkspace(OTHER);
+  assert.deepEqual(new Store(storage).workspace(), { agents: [AGENT], lead: null });
+});
+
+const at = (type, time, body = {}) => ({ type, time, body });
+
+test("lastActivity counts calls made to an agent", () => {
+  const store = new Store(new FakeStorage());
+  store.saveRecord(AGENT, "s-1", [at("hello", "2026-10-28T10:00:00Z"), at("ask", "2026-10-28T10:01:00Z", { text: "hi" })]);
+  const call = { agent: OTHER, name: "other", ask: { body: { text: "price?" } }, reply: null, error: "" };
+  store.saveRecord("C".repeat(43), "s-2", [at("ask", "2026-10-28T11:00:00Z", { text: "q" }),
+    at("answer", "2026-10-28T11:05:00Z", { text: "a", calls: [call] })]);
+  assert.equal(store.lastActivity(AGENT), Date.parse("2026-10-28T10:01:00Z"));
+  assert.equal(store.lastActivity(OTHER), Date.parse("2026-10-28T11:05:00Z"));
+  assert.equal(store.lastActivity("D".repeat(43)), 0);
+  assert.deepEqual(store.lastExchange(OTHER), { by: "C".repeat(43), text: "price?", at: Date.parse("2026-10-28T11:05:00Z") });
+  assert.deepEqual(store.lastExchange(AGENT), { by: null, text: "hi", at: Date.parse("2026-10-28T10:01:00Z") });
+});
+
+test("workspace survives full storage", () => {
+  const storage = new FakeStorage(0);
+  const store = new Store(storage);
+  store.addToWorkspace(AGENT);
+  store.setLead(AGENT);
+  assert.deepEqual(store.workspace(), { agents: [AGENT], lead: AGENT });
+});
