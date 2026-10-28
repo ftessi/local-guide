@@ -296,3 +296,40 @@ def test_public_sessions_marked(tmp_path):
     p.mark_public_session(EVE, "s2")
     assert p.public_sessions() == {f"{BOB}/s1", f"{EVE}/s2"}
     assert p.record_names() == []
+
+
+LEAD = "L" * 43
+MID = "M" * 43
+
+
+def test_chain_allowed_when_every_id_is_accepted(tmp_path):
+    p = demo_side(tmp_path)
+    p.accept_peer(BOB, name="Bob")
+    p.accept_peer(LEAD, name="Lead")
+    assert p.chain_allowed([BOB, LEAD], public=False, via=LEAD)
+
+
+def test_chain_refused_if_one_id_is_not(tmp_path):
+    p = demo_side(tmp_path)
+    p.accept_peer(BOB, name="Bob")
+    p.accept_peer(LEAD, name="Lead")
+    assert not p.chain_allowed([BOB, MID, LEAD], public=False, via=LEAD)
+    assert [(r["id"], r["purpose"]) for r in p.requests()] == [(MID, f"via {LEAD}")]
+    assert "tessera_chain_refused" in (tmp_path / "audit.log").read_text()
+
+
+def test_public_chain_allows_strangers_but_not_rejected(tmp_path):
+    p = demo_side(tmp_path)
+    assert p.chain_allowed([BOB, LEAD], public=True, via=LEAD)
+    p.reject_request(EVE)
+    assert not p.chain_allowed([EVE, LEAD], public=True, via=LEAD)
+    assert p.requests() == []
+
+
+def test_chain_removed_peer_refused_at_once(tmp_path):
+    p = demo_side(tmp_path)
+    p.accept_peer(BOB, name="Bob")
+    p.accept_peer(LEAD, name="Lead")
+    assert p.chain_allowed([BOB, LEAD], public=False, via=LEAD)
+    p.remove_peer(BOB)
+    assert not p.chain_allowed([BOB, LEAD], public=False, via=LEAD)

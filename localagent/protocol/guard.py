@@ -118,6 +118,16 @@ class Protocol:
             return None
         return PeerEntry("public", 1)
 
+    def chain_allowed(self, ids: list[str], *, public: bool, via: str) -> bool:
+        """A delegated ask (v0.3): every id in its mandate chain must be allowed as if it had asked directly, the
+        same way. Unknown ids become requests for the owner, but only when this agent isn't public."""
+        refused = [i for i in ids if self.peer_grant(i, 1) is None and not (public and self.public_grant(i))]
+        for agent_id in refused:
+            if not public:
+                self.record_request(agent_id, f"via {via}", 1)
+            self.audit.log("tessera_chain_refused", peer=agent_id, via=via)
+        return not refused
+
     def open_peer_session(self, agent_id: str, *, public: bool = False) -> Session:
         """A peer gets the connection's adapter and its own memory. No tools, no knowledge, no work, ever."""
         entry = self.peer_grant(agent_id, 1)
