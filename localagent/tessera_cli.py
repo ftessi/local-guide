@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from localagent.config import ConfigError
-from localagent.connect.peer.tessera import inspection_sender
+from localagent.connect.peer.tessera import inspection_sender, remotes
 from localagent.connect.peer.tessera.client import Reply, TesseraClient
 from localagent.protocol.guard import Protocol
 from localagent.protocol.identity import AGENT_ID_RE, load_agent_id, load_identity
@@ -21,7 +21,7 @@ from localagent.protocol.tessera.envelope import EnvelopeError
 from localagent.protocol.prompts import REFUSAL
 
 REMOTE_NAME = re.compile(r"[a-z][a-z0-9_-]*")
-PURPOSE_MAX = 200
+PURPOSE_MAX = remotes.PURPOSE_MAX
 log_ = logging.getLogger(__name__)
 ID_MARK = "id:"  # __main__ marks agent ids starting with "-" so argparse doesn't take them for options
 
@@ -41,37 +41,18 @@ def protocol_for(config) -> Protocol:
     return Protocol.for_agent(config.agent_dir, config.compartments, tools={}, owner_secret="")
 
 
-def _remotes_path(config) -> Path:
-    return Path(config.agent_dir) / "tessera" / "remotes.yaml"
-
-
 def _remotes(config) -> dict:
-    path = _remotes_path(config)
-    if not path.is_file():
-        return {}
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (yaml.YAMLError, OSError, ValueError) as e:
-        raise ConfigError(f"{path} is not readable: {e}") from e
-    if not isinstance(raw, dict):
-        raise ConfigError(f"{path} must be a mapping of names to {{address, id, purpose}}")
-    return raw
+        return remotes.read(config.agent_dir)
+    except remotes.RemotesError as e:
+        raise ConfigError(str(e)) from e
 
 
-def _remote(config, name: str) -> dict:
-    entry = _remotes(config).get(name)
-    if entry is None:
-        raise ConfigError(f"Unknown remote '{name}'. Add it first: python -m localagent connect <address> <id> "
-                          f"--name {name} --purpose \"…\"")
-    if (not isinstance(entry, dict) or not isinstance(entry.get("address"), str)
-            or not isinstance(entry.get("id"), str) or not AGENT_ID_RE.fullmatch(entry["id"])):
-        raise ConfigError(f"{_remotes_path(config)}: '{name}' needs string fields address and id "
-                          "(id: 43 characters, from their `python -m localagent id`)")
-    purpose = entry.get("purpose", "")
-    if not isinstance(purpose, str) or len(purpose) > PURPOSE_MAX:
-        raise ConfigError(f"{_remotes_path(config)}: '{name}' has a bad purpose "
-                          f"(text, at most {PURPOSE_MAX} characters)")
-    return entry
+def _remote(config, name: str) -> remotes.Remote:
+    try:
+        return remotes.get(config.agent_dir, name)
+    except remotes.RemotesError as e:
+        raise ConfigError(str(e)) from e
 
 
 def _identity(config):
@@ -125,8 +106,8 @@ class Asker:
         if name not in self._clients:
             remote = _remote(self._config, name)
             self._clients[name] = TesseraClient(_identity(self._config), protocol_for(self._config),
-                                                remote_id=remote["id"], address=remote["address"],
-                                                purpose=remote.get("purpose", ""))
+                                                remote_id=remote.id, address=remote.address,
+                                                purpose=remote.purpose)
         reply = self._clients[name].ask(question)
         return Answer(describe_reply(name, reply), reply)
 
@@ -204,11 +185,11 @@ def _connect(config, rest: list[str], args, log) -> int:
         raise ConfigError("--name: lowercase letters, digits, '-' or '_'")
     if len(args.purpose) > PURPOSE_MAX:
         raise ConfigError(f"--purpose: at most {PURPOSE_MAX} characters")
-    remotes = _remotes(config)
-    remotes[args.name] = {"address": address, "id": agent_id, "purpose": args.purpose}
-    path = _remotes_path(config)
+    saved = _remotes(config)
+    saved[args.name] = {"address": address, "id": agent_id, "purpose": args.purpose}
+    path = remotes.path(config.agent_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(remotes, sort_keys=True, allow_unicode=True), encoding="utf-8")
+    path.write_text(yaml.safe_dump(saved, sort_keys=True, allow_unicode=True), encoding="utf-8")
     log(f"Saved '{args.name}'. Ask with: python -m localagent ask {args.name} \"<question>\"")
     log(inspection.ASKER_NOTICE)
     return 0
