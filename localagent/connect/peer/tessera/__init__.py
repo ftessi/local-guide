@@ -142,7 +142,7 @@ def check_tessera_folder(config) -> list[str]:
 
 class TesseraConnection(Connection):
     name = "tessera"
-    options = ("builtin", "host", "port", "relay", "listed", "description", "public")
+    options = ("builtin", "host", "port", "relay", "listed", "description", "public", "delegate")
 
     def setup(self, ctx) -> None:
         problems = check_tessera_folder(ctx.config)
@@ -167,10 +167,17 @@ class TesseraConnection(Connection):
         except (OSError, ValueError) as e:
             raise SetupError(f"No usable key-exchange key in {identity_dir} ({e})") from e
         self.kx = kx
+        settings = ctx.settings
+        delegate = settings.get("delegate", False)
+        if not isinstance(delegate, bool):
+            raise SetupError("connections.tessera: `delegate` must be true or false")
+        delegator = None
+        if delegate:  # the agent may ask its owner's remotes while answering someone (docs/08)
+            from localagent.connect.peer.tessera.delegation import Delegator
+            delegator = Delegator(identity, ctx.protocol, ctx.config.agent_dir)
         from localagent.connect.peer.tessera.sealed import SealedEndpoint
         self.endpoint = SealedEndpoint(TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
-                                                       kx_public=x25519_public(kx)), kx)
-        settings = ctx.settings
+                                                       kx_public=x25519_public(kx), delegator=delegator), kx)
         relay, listed, description = settings.get("relay"), settings.get("listed", False), settings.get("description", "")
         if relay is not None and not (isinstance(relay, str) and relay.startswith(("http://", "https://"))):
             raise SetupError("connections.tessera.relay must be the relay's address, like https://relay.example.com")
@@ -196,7 +203,8 @@ class TesseraConnection(Connection):
             link_endpoint = self.endpoint
             if public:  # its own endpoint: the direct server keeps per-peer acceptance only
                 link_endpoint = SealedEndpoint(TesseraEndpoint(identity, ctx.protocol, ctx.agent, name=ctx.config.name,
-                                                               kx_public=x25519_public(kx), public=True), kx)
+                                                               kx_public=x25519_public(kx), public=True,
+                                                               delegator=delegator), kx)
             self.link = RelayLink(link_endpoint, identity, relay, name=ctx.config.name, listed=listed,
                                   description=description, public=public, audit=ctx.protocol.audit)
         self.agent_id = identity.agent_id

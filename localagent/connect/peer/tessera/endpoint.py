@@ -211,8 +211,13 @@ class TesseraEndpoint:
         s.asks_left -= 1
         s.origin = origin
         delegation = self._delegation_for(s, env, ids)
-        reply_text = self.agent.answer_peer(peer_session, text, s.history)
-        calls = delegation.report() if delegation is not None else []
+        if delegation is None:
+            reply_text = self.agent.answer_peer(peer_session, text, s.history)
+            calls = []
+        else:
+            reply_text = self.agent.answer_peer(peer_session, text, s.history, delegation=delegation)
+            calls = delegation.report()
+            self.protocol.audit.log("tessera_delegated", peer=s.peer, session=s.id, calls=len(calls))
         if is_refusal(reply_text) and not calls:
             reply, said = self._reply(s, "decline", "", []), REFUSAL
             self.protocol.audit.log("tessera_decline", peer=s.peer, session=s.id)
@@ -237,5 +242,8 @@ class TesseraEndpoint:
                           body=body, version=s.version)
 
     def _delegation_for(self, s: _Session, ask: dict, ids: list):
-        """The calls this answer may make for its asker; none until `delegate:` is wired."""
-        return None
+        """The calls this answer may make for its asker: only with `delegate:` on and a checked chain, because
+        without one no callee could tell who really asked."""
+        if self.delegator is None or s.version != "0.3" or not ids:
+            return None
+        return self.delegator.start(ask["body"]["mandates"], ids[0], ask["body"]["reply_bytes"] or INNER_MAX)

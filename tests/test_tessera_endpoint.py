@@ -429,3 +429,60 @@ def test_public_chain_through_relay_endpoint(public_side):
     chain.append(w)
     assert asked(public_side, chain, ask03(chain, mandates=mandates_for(Q)))["body"]["code"] == "not_allowed"
     assert public_side.protocol.requests() == []
+
+
+# ── delegate: the lead's endpoint hands a delegation to the agent and reports its calls ──
+
+class SpyDelegator:
+    def __init__(self, report=()):
+        self.started, self.report = [], list(report)
+
+    def start(self, chain, origin, budget):
+        self.started.append((chain, origin, budget))
+        return SimpleNamespace(agents=[("pricing", "Prices")], ask=lambda name, q: "49", report=lambda: self.report)
+
+
+def delegating(side, delegator):
+    side.endpoint.delegator = delegator
+    got = []
+    real = side.endpoint.agent.answer_peer
+
+    def answer_peer(session, question, history, delegation=None):
+        got.append(delegation)
+        return real(session, question, history)
+
+    side.endpoint.agent.answer_peer = answer_peer
+    return got
+
+
+def test_ask_without_chain_never_delegates(side):
+    delegator = SpyDelegator()
+    got = delegating(side, delegator)
+    _, chain = open_session(side)
+    side.backend.replies = ["One.", "Two.", "Three."]
+    asked(side, chain, next_env(chain, "ask", {"text": "Q?"}))
+    _, chain = open_session(side, version="0.3")
+    asked(side, chain, ask03(chain))
+    assert got == [None, None] and delegator.started == []
+    side.protocol.accept_peer(P.agent_id, name="Pat")
+    _, chain = open_session(side, version="0.3")
+    asked(side, chain, ask03(chain, mandates=mandates_for(P), reply_bytes=30000))
+    assert got[-1] is not None
+    (started,) = delegator.started
+    assert started[1] == P.agent_id and started[2] == 30000 and len(started[0]) == 2
+
+
+def test_answer_with_report_fits(side):
+    from localagent.connect.peer.tessera.delegation import ASK_RESERVE, MAX_CALLS, call_bytes
+    from localagent.protocol.tessera.envelope import INNER_MAX
+    share = ASK_RESERVE + call_bytes(INNER_MAX)
+    item = {"agent": C.agent_id, "name": "pricing", "ask": None, "reply": None, "error": ""}
+    item["error"] = "x" * (share - len(json.dumps(item)) - 10)
+    delegating(side, SpyDelegator(report=[item] * MAX_CALLS))
+    side.protocol.accept_peer(P.agent_id, name="Pat")
+    _, chain = open_session(side, version="0.3")
+    side.backend.replies = ["y" * 20000]
+    raw = side.endpoint.handle(encode(ask03(chain, mandates=mandates_for(P))))
+    answer = decode(raw, NOW)
+    assert len(raw) <= INNER_MAX and answer["type"] == "answer" and len(answer["body"]["calls"]) == MAX_CALLS
+    assert answer["body"]["text"].startswith("y")
