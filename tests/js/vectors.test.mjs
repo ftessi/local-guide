@@ -36,7 +36,7 @@ test("envelopes: canonical bytes, hashes, signatures, decode", () => {
     assert.equal(envelopeHash(env), item.hash);
     const { sig, tessera, from, ...fields } = env;
     const signer = from === A.agentId ? A : B;
-    const again = signEnvelope(signer, fields, TIME);
+    const again = signEnvelope(signer, fields, TIME, tessera);
     assert.equal(again.sig, sig);
     assert.deepEqual(decode(utf8(item.canonical), TIME), env);
   }
@@ -81,4 +81,35 @@ test("sealed packages reproduce the vectors", () => {
   const tampered = { ...seal.parse(utf8(pkgs.answer)), n: 2 };
   assert.throws(() => seal.openMsg(opened.keys, seal.TO_ASKER, tampered), (e) => e.code === "bad_signature");
   assert.throws(() => seal.parse(utf8('{"tessera":"0.2","kind":"msg","h":"x","n":1,"ct":""}')), (e) => e.code === "malformed");
+});
+
+const V3 = JSON.parse(readFileSync(new URL("../data/tessera_vectors_v0.3.json", import.meta.url), "utf8"));
+
+test("v0.3 envelopes reproduce the vectors and the chains check", async () => {
+  const { checkChain, signMandate } = await import("../../localagent/relay/web/js/mandate.js");
+  const { checkSigned } = await import("../../localagent/relay/web/js/envelope.js");
+  const ids = Object.fromEntries(Object.entries(V3.keys).map(([k, v]) => [k, identityFromSeed(fromHex(v.seed_hex))]));
+  for (const [k, v] of Object.entries(V3.keys)) assert.equal(ids[k].agentId, v.agent_id);
+  const byId = Object.fromEntries(Object.values(ids).map((i) => [i.agentId, i]));
+  const env3 = {};
+  for (const item of V3.envelopes) {
+    const env = item.envelope;
+    env3[item.name] = env;
+    assert.equal(text(canonical(env)), item.canonical);
+    assert.equal(envelopeHash(env), item.hash);
+    const { sig, tessera, from, ...fields } = env;
+    assert.equal(signEnvelope(byId[from], fields, TIME, tessera).sig, sig);
+    assert.deepEqual(checkSigned(env), env);
+  }
+  assert.deepEqual(signMandate(ids.B, { to: ids.A.agentId, before: null }, TIME), env3.mandate_b_a);
+  assert.deepEqual(signMandate(ids.A, { to: ids.C.agentId, before: env3.mandate_b_a }, TIME), env3.mandate_a_c);
+  assert.deepEqual(checkChain(env3.ask_with_mandate.body.mandates, { caller: ids.B.agentId, me: ids.A.agentId, now: TIME }),
+    [ids.B.agentId]);
+  assert.deepEqual(checkChain(env3.delegated_ask.body.mandates, { caller: ids.A.agentId, me: ids.C.agentId, now: TIME }),
+    [ids.B.agentId, ids.A.agentId]);
+  assert.throws(() => checkChain(env3.delegated_ask.body.mandates, { caller: ids.B.agentId, me: ids.C.agentId, now: TIME }),
+    (e) => e.code === "not_allowed");
+  assert.throws(() => checkChain(env3.delegated_ask.body.mandates,
+    { caller: ids.A.agentId, me: ids.C.agentId, now: new Date(TIME.getTime() + 601_000) }), (e) => e.code === "not_allowed");
+  assert.throws(() => decode(canonical({ ...env3.ask_with_mandate, tessera: "0.2" }), TIME), (e) => e.code === "malformed");
 });

@@ -6,7 +6,9 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { b64url, b64urlDecode } from "./b64.js";
 import { canonical } from "./canonical.js";
 
-export const VERSION = "0.2";
+export const VERSION = "0.3";
+export const WIRE_VERSIONS = ["0.2", "0.3"];
+export const CARD_VERSION = "0.2"; // cards stay 0.2 envelopes, so v0.2 clients still read them
 export const INNER_MAX = 46 * 1024;
 const MAX_BYTES = 64 * 1024;
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -22,6 +24,11 @@ const BODIES = {
   close: {},
   error: { code: "string" },
   card: { agent_id: "string", name: "string", versions: "array", kx: "string" },
+};
+const SHAPES = {
+  "0.2": BODIES,
+  "0.3": { ...BODIES, ask: { text: "string", mandates: "array", reply_bytes: "int" },
+    answer: { text: "string", binding: "boolean", calls: "array" }, mandate: { expires: "string" } },
 };
 const TEXT_LIMITS = { purpose: 200, nonce: 64, session: 64, expires: 20, name: 100, code: 32, agent_id: 43, e: 43, f: 43, kx: 43 };
 const ERROR_CODES = new Set(["bad_signature", "bad_chain", "stale", "too_large", "expired", "limit", "not_allowed",
@@ -60,8 +67,8 @@ export function parseTime(text) {
 
 export const envelopeHash = (env) => b64url(sha256(canonical(env)));
 
-export function signEnvelope(identity, { type, session, to, seq, prev, body }, now) {
-  const env = { tessera: VERSION, type, session, from: identity.agentId, to, seq, prev, time: formatTime(now), body };
+export function signEnvelope(identity, { type, session, to, seq, prev, body }, now, version = VERSION) {
+  const env = { tessera: version, type, session, from: identity.agentId, to, seq, prev, time: formatTime(now), body };
   return { ...env, sig: identity.sign(canonical(env)) };
 }
 
@@ -71,13 +78,13 @@ const isType = (value, kind) =>
       : kind === "object" ? value !== null && typeof value === "object" && !Array.isArray(value)
         : typeof value === kind;
 
-export function checkShape(env) {
+export function checkShape(env, versions = WIRE_VERSIONS) {
   const bad = (why) => { throw new TesseraError("malformed", why); };
   if (env === null || typeof env !== "object" || Array.isArray(env) || Object.keys(env).sort().join() !== FIELDS.join()) {
     bad("an envelope has exactly the fields " + FIELDS.join(", "));
   }
-  if (env.tessera !== VERSION) bad(`unsupported version ${env.tessera}`);
-  const spec = BODIES[env.type];
+  if (!versions.includes(env.tessera)) bad(`unsupported version ${env.tessera}`);
+  const spec = Object.hasOwn(SHAPES[env.tessera], env.type) ? SHAPES[env.tessera][env.type] : null;
   if (typeof env.type !== "string" || !spec) bad(`unknown type ${env.type}`);
   for (const f of ["session", "from", "to", "prev", "time", "sig"]) if (typeof env[f] !== "string") bad(`'${f}' must be text`);
   if (!Number.isSafeInteger(env.seq) || env.seq < -1) bad("'seq' must be an integer ≥ -1");
@@ -99,6 +106,10 @@ export function checkShape(env) {
   }
   if (t === "answer" && body.binding !== false) bad("answers are never binding at levels 1 and 2");
   if (t === "error" && !ERROR_CODES.has(body.code)) bad(`unknown error code ${body.code}`);
+  if (t === "ask" && "reply_bytes" in body && body.reply_bytes < 0) bad("'reply_bytes' must be ≥ 0");
+  if (t === "mandate") {
+    try { parseTime(body.expires); } catch { bad("'expires' must look like 2026-10-11T13:00:00Z"); }
+  }
   if (t === "welcome") {
     const limits = body.limits;
     if (Object.keys(limits).sort().join() !== "ask_chars,asks" || !Object.values(limits).every((v) => Number.isSafeInteger(v) && v >= 0)) {
@@ -113,16 +124,9 @@ export function checkShape(env) {
   }
 }
 
-/** Bytes to a checked envelope: size, JSON, shape, signature, time. Chain and session checks are the caller's. */
-export function decode(raw, now) {
-  if (raw.length > INNER_MAX) throw new TesseraError("too_large", `envelopes are at most ${INNER_MAX} bytes`);
-  let env;
-  try {
-    env = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
-  } catch {
-    throw new TesseraError("malformed", "not a JSON object");
-  }
-  checkShape(env);
+/** Shape and signature only, no clock: for envelopes carried inside others (mandates, reported calls). */
+export function checkSigned(env, versions = WIRE_VERSIONS) {
+  checkShape(env, versions);
   let signed;
   try {
     const { sig, ...rest } = env;
@@ -131,6 +135,19 @@ export function decode(raw, now) {
     throw new TesseraError("malformed", e.message);
   }
   if (!verify(env.from, signed, env.sig)) throw new TesseraError("bad_signature", "the signature doesn't match the sender");
+  return env;
+}
+
+/** Bytes to a checked envelope: size, JSON, shape, signature, time. Chain and session checks are the caller's. */
+export function decode(raw, now, versions = WIRE_VERSIONS) {
+  if (raw.length > INNER_MAX) throw new TesseraError("too_large", `envelopes are at most ${INNER_MAX} bytes`);
+  let env;
+  try {
+    env = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+  } catch {
+    throw new TesseraError("malformed", "not a JSON object");
+  }
+  checkSigned(env, versions);
   if (Math.abs(parseTime(env.time) - now) > CLOCK_SKEW_MS) throw new TesseraError("stale", "the envelope's time is more than 5 minutes from ours");
   return env;
 }
