@@ -66,3 +66,44 @@ def build_vectors() -> dict:
             "canonical": [{"value": v, "canonical": canonical(v).decode("utf-8")} for v in CANONICAL_CASES],
             "envelopes": items,
             "packages": [{"name": n, "package": raw.decode("utf-8")} for n, raw in packages]}
+
+
+SEED_C = bytes(range(64, 96))
+SESSION_C = "s-fedcba9876543210"
+DELEGATED_REPLY_BYTES = 6656
+
+
+def build_vectors_v03() -> dict:
+    """v0.3 additions: a person (B) asks a lead (A) with a mandate; A asks C on B's behalf and reports the call."""
+    from localagent.protocol.tessera.mandate import sign_mandate
+    a, b, c = identity_from_seed(SEED_A), identity_from_seed(SEED_B), identity_from_seed(SEED_C)
+    items = []
+
+    def add(name: str, env: dict) -> dict:
+        signed = canonical({k: v for k, v in env.items() if k != "sig"}).decode("utf-8")
+        items.append({"name": name, "envelope": env, "signed_bytes": signed, "hash": envelope_hash(env),
+                      "canonical": encode(env).decode("utf-8")})
+        return env
+
+    def sign(identity, **fields) -> dict:
+        return sign_envelope(identity, now=TIME, version="0.3", **fields)
+
+    b_a = add("mandate_b_a", sign_mandate(b, to=a.agent_id, before=None, now=TIME))
+    a_c = add("mandate_a_c", sign_mandate(a, to=c.agent_id, before=b_a, now=TIME))
+    ask = add("ask_with_mandate", sign(b, type="ask", session=SESSION, to=a.agent_id, seq=2, prev="",
+                                       body={"text": "What does the pricing agent charge?", "mandates": [b_a],
+                                             "reply_bytes": 0}))
+    delegated = add("delegated_ask", sign(a, type="ask", session=SESSION_C, to=c.agent_id, seq=2, prev="",
+                                          body={"text": "What do you charge?", "mandates": [b_a, a_c],
+                                                "reply_bytes": DELEGATED_REPLY_BYTES}))
+    reply = add("delegated_answer", sign(c, type="answer", session=SESSION_C, to=a.agent_id, seq=3,
+                                         prev=envelope_hash(delegated),
+                                         body={"text": "49 euros a month.", "binding": False, "calls": []}))
+    add("answer_with_calls", sign(a, type="answer", session=SESSION, to=b.agent_id, seq=3, prev=envelope_hash(ask),
+                                  body={"text": "The pricing agent charges 49 euros a month.", "binding": False,
+                                        "calls": [{"agent": c.agent_id, "name": "Carla's pricing agent",
+                                                   "ask": delegated, "reply": reply, "error": ""}]}))
+    return {"tessera": "0.3",
+            "keys": {name: {"seed_hex": seed.hex(), "agent_id": identity_from_seed(seed).agent_id}
+                     for name, seed in (("A", SEED_A), ("B", SEED_B), ("C", SEED_C))},
+            "envelopes": items}
