@@ -1,7 +1,7 @@
 """The requesting side of Tessera: handshake, one ask at a time, every reply checked and recorded.
 Nothing here raises to the caller: a failed record is reported as not_connected or an error reply."""
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from http.client import HTTPException
 
@@ -15,6 +15,7 @@ from localagent.protocol.tessera import seal
 from localagent.protocol.tessera.canonical import canonical
 from localagent.protocol.tessera.chain import Chain
 from localagent.protocol.tessera.envelope import EnvelopeError, decode, encode, parse_time, sign_envelope
+from localagent.protocol.tessera.mandate import sign_mandate
 
 
 REQUESTED_LEVEL = 1  # Ask
@@ -25,6 +26,9 @@ CLOSE_TIMEOUT = 5    # seconds; closing is a courtesy and must not hold up the o
 class Reply:
     kind: str  # answer | decline | not_connected | error
     text: str = ""
+    ask: dict | None = field(default=None, compare=False)    # the signed exchange, for a lead's report (v0.3)
+    reply: dict | None = field(default=None, compare=False)
+    calls: list = field(default_factory=list, compare=False)  # the calls the other agent reported making
 
 
 class TesseraClient:
@@ -41,6 +45,7 @@ class TesseraClient:
         self._expires: datetime | None = None
         self._asks_left = 0
         self._max_chars = 0
+        self.version = "0.2"  # the highest version both sides speak, from the agent's card at each connect
 
     @property
     def session_id(self) -> str | None:
@@ -49,7 +54,7 @@ class TesseraClient:
 
     def _sign(self, type_: str, body: dict, *, session: str, seq: int, prev: str) -> dict:
         return sign_envelope(self.identity, type=type_, session=session, to=self.remote_id, seq=seq, prev=prev,
-                             body=body, now=self._clock(), version="0.2")
+                             body=body, now=self._clock(), version=self.version)
 
     def _check(self, env: dict, *, anyone: bool = False) -> dict:
         """A reply must come from the agent we asked and be addressed to us ('' allowed for clear errors)."""
@@ -62,6 +67,7 @@ class TesseraClient:
         card = decode(self._get_card(self.address), self._clock())
         if card["type"] != "card" or card["from"] != self.remote_id or card["body"]["agent_id"] != self.remote_id:
             raise EnvelopeError("bad_signature", "the card isn't this agent's")
+        self.version = "0.3" if "0.3" in card["body"]["versions"] else "0.2"
         return card["body"]["kx"]
 
     def _exchange(self, env: dict) -> dict:
@@ -118,18 +124,29 @@ class TesseraClient:
         self._sid = None
         return self._connect()
 
-    def ask(self, text: str) -> Reply:
-        reply = self._ask_once(text)
+    def ask(self, text: str, *, mandates: list | None = None, reply_bytes: int = 0) -> Reply:
+        """`mandates` is the chain so far when asking on someone's behalf (None: this client is the origin).
+        v0.3 adds this client's own link; a v0.2 agent can't check a chain, so a delegated ask isn't sent."""
+        reply = self._ask_once(text, mandates, reply_bytes)
         if reply == Reply("error", "expired"):  # e.g. the other side restarted: its sessions are gone
-            reply = self._ask_once(text)
+            reply = self._ask_once(text, mandates, reply_bytes)
         return reply
 
-    def _ask_once(self, text: str) -> Reply:
+    def _ask_once(self, text: str, mandates: list | None, reply_bytes: int) -> Reply:
         if not self._ready():
             return Reply("not_connected")
         if len(text) > self._max_chars:
             return Reply("error", f"question too long (max {self._max_chars} characters)")
-        ask = self._sign("ask", {"text": text}, session=self._sid, seq=self._chain.next_seq(),
+        if self.version == "0.2":
+            if mandates is not None:
+                return Reply("error", "old_version")
+            body = {"text": text}
+        else:
+            chain = list(mandates or [])
+            chain.append(sign_mandate(self.identity, to=self.remote_id, before=chain[-1] if chain else None,
+                                      now=self._clock()))
+            body = {"text": text, "mandates": chain, "reply_bytes": reply_bytes}
+        ask = self._sign("ask", body, session=self._sid, seq=self._chain.next_seq(),
                          prev=self._chain.last_hash())
         try:
             self.protocol.record_envelope(self.remote_id, self._sid, ask)  # recorded first: nothing is sent unrecorded
@@ -162,9 +179,9 @@ class TesseraClient:
             return Reply("error", "could not record locally")
         self._chain.append(reply)
         if reply["type"] == "answer":
-            return Reply("answer", reply["body"]["text"])
+            return Reply("answer", reply["body"]["text"], ask=ask, reply=reply, calls=reply["body"].get("calls", []))
         if reply["type"] == "decline":
-            return Reply("decline")
+            return Reply("decline", ask=ask, reply=reply)
         self._sid = None
         return Reply("error", "not_allowed")
 

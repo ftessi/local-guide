@@ -277,3 +277,74 @@ def test_close_uses_a_short_timeout(tmp_path):
     assert c.ask("1?").kind == "answer"
     c.close()
     assert timeouts[-1] <= 5 < timeouts[0]
+
+
+# ── v0.3: the client attaches its mandate ──────────────────────────────────
+
+def seen_asks(endpoint):
+    """Wraps the inner endpoint so a test can see each decoded ask it receives."""
+    from localagent.protocol.tessera.envelope import decode
+    inner, asks = endpoint.endpoint, []
+    real = inner._turn
+
+    def turn(s, env):
+        if env["type"] == "ask":
+            asks.append(env)
+        return real(s, env)
+
+    inner._turn = turn
+    return asks
+
+
+def test_v03_ask_carries_own_mandate(tmp_path):
+    a, endpoint = a_side(tmp_path, ["Fine."])
+    a.accept_peer(B.agent_id, name="Bob")
+    asks = seen_asks(endpoint)
+    c = client(b_protocol(tmp_path), endpoint)
+    assert c.ask("Q?") == Reply("answer", "Fine.") and c.version == "0.3"
+    (ask,) = asks
+    assert ask["tessera"] == "0.3" and ask["body"]["reply_bytes"] == 0
+    (m,) = ask["body"]["mandates"]
+    assert m["from"] == B.agent_id and m["to"] == A.agent_id
+
+
+def test_v03_delegated_ask_extends_chain(tmp_path):
+    from localagent.protocol.tessera.mandate import sign_mandate
+    P = identity_from_seed(bytes([7]) * 32)
+    a, endpoint = a_side(tmp_path, ["For P."])
+    a.accept_peer(B.agent_id, name="Bob")
+    a.accept_peer(P.agent_id, name="Pat")
+    asks = seen_asks(endpoint)
+    first = sign_mandate(P, to=B.agent_id, before=None, now=utc_now())
+    reply = client(b_protocol(tmp_path), endpoint).ask("Q?", mandates=[first], reply_bytes=4000)
+    assert reply == Reply("answer", "For P.")
+    sent = asks[0]["body"]
+    assert [(m["from"], m["to"]) for m in sent["mandates"]] == [(P.agent_id, B.agent_id), (B.agent_id, A.agent_id)]
+    assert sent["reply_bytes"] == 4000
+
+
+def test_v02_agent_gets_v02(tmp_path):
+    from localagent.protocol.tessera.envelope import sign_envelope
+    a, endpoint = a_side(tmp_path, ["Old.", "never"])
+    a.accept_peer(B.agent_id, name="Bob")
+    asks = seen_asks(endpoint)
+    old_card = encode(sign_envelope(A, version="0.2", type="card", session="", to="", seq=0, prev="", now=utc_now(),
+                                    body={"agent_id": A.agent_id, "name": "Old", "versions": ["0.2"],
+                                          "kx": x25519_public(KX)}))
+    c = TesseraClient(B, b_protocol(tmp_path), remote_id=A.agent_id, address="x", purpose="p",
+                      post=direct(endpoint), get_card=lambda address, **kw: old_card)
+    assert c.ask("Q?") == Reply("answer", "Old.") and c.version == "0.2"
+    assert asks[0]["tessera"] == "0.2" and asks[0]["body"] == {"text": "Q?"}
+    assert c.ask("Q?", mandates=[]) == Reply("error", "old_version")
+    assert len(asks) == 1
+
+
+def test_reply_carries_signed_envelopes(tmp_path):
+    from localagent.protocol.tessera.envelope import check_signed, envelope_hash
+    a, endpoint = a_side(tmp_path, ["Signed."])
+    a.accept_peer(B.agent_id, name="Bob")
+    reply = client(b_protocol(tmp_path), endpoint).ask("Q?")
+    check_signed(reply.ask)
+    check_signed(reply.reply)
+    assert reply.reply["prev"] == envelope_hash(reply.ask) and reply.calls == []
+    assert reply.ask["from"] == B.agent_id and reply.reply["from"] == A.agent_id
