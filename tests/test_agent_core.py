@@ -445,3 +445,95 @@ def test_answer_peer_is_not_for_the_owner(tmp_path):
     with pytest.raises(ValueError, match="peer sessions"):
         agent.answer_peer(proto.open_owner_session("t"), "hi", [])
     assert backend.calls == []
+
+
+# ── Delegation: one tool, `agents.ask`, only when the endpoint hands over a delegation ──
+
+ASK_PRICING = '<tool>{"name":"agents","action":"ask","args":{"agent":"pricing","question":"price?"}}</tool>'
+
+
+class FakeDelegation:
+    def __init__(self, answers=None, during=None):
+        self.agents = [("pricing", "Prices and plans")]
+        self.asked, self.answers, self.during = [], list(answers or ["49 €"]), during
+
+    def ask(self, name, question):
+        self.asked.append((name, question))
+        if self.during:
+            self.during()
+        return self.answers.pop(0) if self.answers else "(pricing could not answer: limit)"
+
+
+def test_peer_without_delegation_has_no_tools(tmp_path):
+    tools, proto, _ = peer_side(tmp_path)
+    agent, backend = make_agent(tools, [ASK_PRICING])
+    reply = agent.answer_peer(proto.open_peer_session(BOB), "How much?", [])
+    assert reply == ASK_PRICING and len(backend.calls) == 1  # answered as text, nothing ran
+
+
+def test_peer_delegation_calls_and_answers(tmp_path):
+    from localagent.protocol.prompts import DELEGATION_PROMPT
+    tools, proto, _ = peer_side(tmp_path)
+    agent, backend = make_agent(tools, [ASK_PRICING, "It costs 49 €."])
+    delegation = FakeDelegation()
+    session = proto.open_peer_session(BOB)
+    assert agent.answer_peer(session, "How much?", [], delegation=delegation) == "It costs 49 €."
+    assert delegation.asked == [("pricing", "price?")]
+    system = backend.calls[0][0]["content"]
+    assert system.startswith(PEER_SYSTEM_PROMPT) and "pricing: Prices and plans" in system
+    assert DELEGATION_PROMPT.split("{")[0] in system
+    assert "pricing says:\n49 €" in backend.calls[1][-1]["content"]
+    assert session.history(5)[-1] == {"role": "assistant", "content": "It costs 49 €."}
+
+
+def test_peer_delegation_ignores_other_tools(tmp_path):
+    tools, proto, _ = peer_side(tmp_path)
+    agent, backend = make_agent(tools, [CREATE, "done"])
+    delegation = FakeDelegation()
+    reply = agent.answer_peer(proto.open_peer_session(BOB), "Add a note", [], delegation=delegation)
+    assert tools["notes"].notes == [] and delegation.asked == [] and len(backend.calls) == 1
+    assert "<tool>" not in reply
+
+
+def test_peer_delegation_stops_after_max_rounds(tmp_path):
+    from localagent.agent.core import MAX_ROUNDS
+    tools, proto, _ = peer_side(tmp_path)
+    agent, backend = make_agent(tools, [ASK_PRICING] * 10)
+    delegation = FakeDelegation(answers=["a", "b", "c", "d"])
+    agent.answer_peer(proto.open_peer_session(BOB), "How much?", [], delegation=delegation)
+    assert len(backend.calls) == MAX_ROUNDS and len(delegation.asked) == MAX_ROUNDS - 1
+
+
+def test_lock_released_during_call(tmp_path):
+    import threading
+    tools, proto, _ = peer_side(tmp_path)
+    agent, backend = make_agent(tools, [ASK_PRICING, "inner answer", "outer answer"])
+    inner = []
+
+    def other_peer():
+        t = threading.Thread(target=lambda: inner.append(agent.answer_peer(proto.open_peer_session(BOB), "hi", [])))
+        t.start()
+        t.join(timeout=5)
+
+    reply = agent.answer_peer(proto.open_peer_session(BOB), "How much?", [], delegation=FakeDelegation(during=other_peer))
+    assert inner == ["inner answer"] and reply == "outer answer"
+
+
+def test_no_adapter_still_refuses_even_with_delegation(tmp_path):
+    tools, proto, adapter = peer_side(tmp_path)
+    (adapter / "adapter.json").unlink()
+    adapter.rmdir()
+    agent, backend = make_agent(tools, [ASK_PRICING])
+    delegation = FakeDelegation()
+    assert agent.answer_peer(proto.open_peer_session(BOB), "How much?", [], delegation=delegation) == REFUSAL
+    assert backend.calls == [] and delegation.asked == []
+
+
+def test_delegated_calls_are_recorded(tmp_path):
+    tools, proto, _ = peer_side(tmp_path)
+    agent, _ = make_agent(tools, [ASK_PRICING, "Sorry."])
+    session = proto.open_peer_session(BOB)
+    recorded = []
+    session.record = recorded.append
+    agent.answer_peer(session, "How much?", [], delegation=FakeDelegation(answers=["(pricing could not answer: not_allowed)"]))
+    assert recorded[-1]["tool_calls"] == [{"name": "agents", "action": "ask", "ok": False, "error": "not_allowed"}]

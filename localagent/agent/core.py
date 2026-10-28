@@ -12,7 +12,7 @@ from localagent.agent.excerpt import excerpt
 from localagent.agent.prompt import build_system_prompt
 from localagent.agent.toolcalls import ToolCall, VisibleText, parse_tool_calls, strip_tool_tags, tool_being_called
 from localagent.agent.tools.base import ToolArgsError, validate_args
-from localagent.protocol.prompts import PEER_SYSTEM_PROMPT, REFUSAL
+from localagent.protocol.prompts import DELEGATION_PROMPT, PEER_SYSTEM_PROMPT, REFUSAL
 from localagent.protocol.session import WITHHELD, ScopeError, Session, UnknownToolError
 from localagent.runtime.base import Backend
 
@@ -148,9 +148,10 @@ class Agent:
                                kind=spec.kind)
         return ToolOutcome(name, action, True, result=result, kind=spec.kind)
 
-    def answer_peer(self, session: Session, question: str, history: list[dict]) -> str:
+    def answer_peer(self, session: Session, question: str, history: list[dict], delegation=None) -> str:
         """One Tessera `ask`: the connection's adapter, the open peer prompt, this Tessera session's earlier
-        questions. No tools and nothing of the owner's: the model here is treated as controlled by the peer."""
+        questions. Nothing of the owner's: the model here is treated as controlled by the peer. Its only possible
+        tool is `agents.ask`, and only when the owner switched `delegate:` on (the endpoint passes a delegation)."""
         if session.principal == "owner":
             raise ValueError("answer_peer is for peer sessions")
         with self._lock:
@@ -158,12 +159,49 @@ class Agent:
             if not adapters:  # no connection adapter: the bare base model must never answer a peer
                 session.record({"user": question, "assistant": REFUSAL, "tool_calls": []})
                 return REFUSAL
-            self.backend.set_adapters(adapters)
-            system = {"role": "system", "content": PEER_SYSTEM_PROMPT}
-            messages = _fit(system, history, [{"role": "user", "content": question}], self.max_prompt_chars)
-            reply = self.backend.generate(messages, self.max_new_tokens).strip()
-            session.record({"user": question, "assistant": reply, "tool_calls": []})
-            return reply
+            if delegation is None:
+                self.backend.set_adapters(adapters)
+                system = {"role": "system", "content": PEER_SYSTEM_PROMPT}
+                messages = _fit(system, history, [{"role": "user", "content": question}], self.max_prompt_chars)
+                reply = self.backend.generate(messages, self.max_new_tokens).strip()
+                session.record({"user": question, "assistant": reply, "tool_calls": []})
+                return reply
+        agents = "\n".join(f"- {name}: {purpose}" for name, purpose in delegation.agents)
+        system = {"role": "system", "content": PEER_SYSTEM_PROMPT + "\n\n" + DELEGATION_PROMPT.format(agents=agents)}
+        this_turn, records, reply = [{"role": "user", "content": question}], [], ""
+        for round_no in range(1, MAX_ROUNDS + 1):
+            with self._lock:  # held only while generating: a call to another agent can take minutes
+                self.backend.set_adapters(adapters)
+                messages = _fit(system, history, this_turn, self.max_prompt_chars)
+                raw = self.backend.generate(messages, self.max_new_tokens).strip()
+            reply = strip_tool_tags(raw)
+            calls, errors = parse_tool_calls(raw)
+            for error in errors:
+                log.warning("Ignored tool call from a peer turn: %s", error)
+            asks = [c for c in calls if (c.name, c.action) == ("agents", "ask")]
+            for c in calls:
+                if c not in asks:
+                    log.warning("Ignored %s.%s in a peer turn: only agents.ask exists there", c.name, c.action)
+            if not asks or round_no == MAX_ROUNDS:
+                break
+            answers = []
+            for c in asks:
+                name, text = str(c.args.get("agent", "")), c.args.get("question")
+                if not isinstance(text, str) or not text.strip():
+                    result = f"({name} could not answer: the question is missing)"
+                else:
+                    result = delegation.ask(name, text)
+                failed = result.startswith(f"({name} could not answer")
+                error = result[len(f"({name} could not answer: "):-1] if failed else ""
+                records.append({"name": "agents", "action": "ask", "ok": not failed, "error": error})
+                answers.append(f"{name} says:\n{result}")
+            ran = [ToolOutcome("agents", "ask", True)] * len(asks)
+            results = ("Answers from the agents you asked (use them to answer my previous message):\n\n"
+                       + "\n\n".join(answers))
+            this_turn = this_turn + [{"role": "assistant", "content": _canonical(reply, asks, ran)},
+                                     {"role": "user", "content": results}]
+        session.record({"user": question, "assistant": reply, "tool_calls": records})
+        return reply
 
     def _follow(self, session: Session, outcomes: list[ToolOutcome]) -> tuple[list[ToolCall], list[ToolOutcome]]:
         """For tools with `follow:` (e.g. search -> fetch_content): opens the first link in the result that works,
