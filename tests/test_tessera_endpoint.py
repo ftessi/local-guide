@@ -47,7 +47,7 @@ def send(side, env):
 
 
 def hello(who=B, level=1):
-    return sign_envelope(who, type="hello", session="", to=A.agent_id, seq=0, prev="",
+    return sign_envelope(who, version="0.2", type="hello", session="", to=A.agent_id, seq=0, prev="",
                          body={"purpose": "Review contract v3", "requested_level": level, "nonce": "n1", "e": EKEY}, now=NOW)
 
 
@@ -63,7 +63,7 @@ def open_session(side):
 
 def next_env(chain, type_, body, who=B, session=None, now=NOW):
     sid = session if session is not None else chain.envelopes[1]["body"]["session"]
-    return sign_envelope(who, type=type_, session=sid, to=A.agent_id, seq=chain.next_seq(),
+    return sign_envelope(who, version="0.2", type=type_, session=sid, to=A.agent_id, seq=chain.next_seq(),
                          prev=chain.last_hash(), body=body, now=now)
 
 
@@ -112,7 +112,7 @@ def test_protocol_errors(side):
     ask = next_env(chain, "ask", {"text": "Q?"})
     tampered = {**ask, "body": {"text": "Other?"}}
     assert send(side, tampered)["body"]["code"] == "bad_signature"
-    wrong_seq = sign_envelope(B, type="ask", session=sid, to=A.agent_id, seq=5, prev=chain.last_hash(),
+    wrong_seq = sign_envelope(B, version="0.2", type="ask", session=sid, to=A.agent_id, seq=5, prev=chain.last_hash(),
                               body={"text": "Q?"}, now=NOW)
     assert send(side, wrong_seq)["body"]["code"] == "bad_chain"
     assert send(side, next_env(chain, "answer", {"text": "x", "binding": False}))["body"]["code"] == "not_allowed"
@@ -120,7 +120,7 @@ def test_protocol_errors(side):
     assert send(side, next_env(chain, "ask", {"text": "Q?"}, session="s-nope"))["body"]["code"] == "expired"
     stale = next_env(chain, "ask", {"text": "Q?"}, now=NOW - timedelta(minutes=6))
     assert send(side, stale)["body"]["code"] == "stale"
-    elsewhere = sign_envelope(B, type="ask", session=sid, to=C.agent_id, seq=chain.next_seq(),
+    elsewhere = sign_envelope(B, version="0.2", type="ask", session=sid, to=C.agent_id, seq=chain.next_seq(),
                               prev=chain.last_hash(), body={"text": "Q?"}, now=NOW)
     assert send(side, elsewhere)["body"]["code"] == "not_allowed"
     error = send(side, wrong_seq)
@@ -194,7 +194,7 @@ def test_undecodable_bytes_get_an_error_addressed_to_nobody(side):
 
 
 def test_a_hello_must_start_at_seq_zero(side):
-    h = sign_envelope(B, type="hello", session="", to=A.agent_id, seq=1, prev="",
+    h = sign_envelope(B, version="0.2", type="hello", session="", to=A.agent_id, seq=1, prev="",
                       body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1", "e": EKEY}, now=NOW)
     assert send(side, h)["body"]["code"] == "bad_chain"
 
@@ -237,7 +237,7 @@ def test_a_failed_hello_record_opens_no_session(side, monkeypatch):
     monkeypatch.setattr(side.protocol, "record_envelope", fail)
     assert send(side, hello())["body"]["code"] == "unavailable"
     for session in ("", "s-" + "0" * 16):
-        ask = sign_envelope(B, type="ask", session=session, to=A.agent_id, seq=2, prev="",
+        ask = sign_envelope(B, version="0.2", type="ask", session=session, to=A.agent_id, seq=2, prev="",
                             body={"text": "Q?"}, now=NOW)
         assert send(side, ask)["body"]["code"] == "expired"
 

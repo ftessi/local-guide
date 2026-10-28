@@ -142,7 +142,7 @@ def test_a_failed_hello_doesnt_reveal_the_asker(tmp_path):
     a, sealed = agent_side(tmp_path, ["one"])
     a.accept_peer(B.agent_id, name="Bob")
     e = x25519_from_seed(bytes(range(160, 192)))
-    stale = sign_envelope(B, type="hello", session="", to=A.agent_id, seq=0, prev="",  # the asker's clock is off
+    stale = sign_envelope(B, version="0.2", type="hello", session="", to=A.agent_id, seq=0, prev="",  # the asker's clock is off
                           body={"purpose": "p", "requested_level": 1, "nonce": "n", "e": x25519_public(e)},
                           now=Clock().now - timedelta(minutes=10))
     reply = sealed.handle(seal.seal_hello(e, x25519_public(KX), encode(stale)))

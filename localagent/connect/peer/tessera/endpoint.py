@@ -16,7 +16,7 @@ from localagent.protocol.identity import x25519_public
 from localagent.protocol.prompts import REFUSAL
 from localagent.protocol.tessera.canonical import canonical
 from localagent.protocol.tessera.chain import Chain
-from localagent.protocol.tessera.envelope import (VERSION, EnvelopeError, decode, encode, envelope_hash,
+from localagent.protocol.tessera.envelope import (EnvelopeError, decode, encode, envelope_hash,
                                                   format_time, sender_of, sign_envelope)
 
 log = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class TesseraEndpoint:
 
     def _sign(self, type_: str, *, to: str, seq: int, prev: str, body: dict, session: str = "") -> dict:
         return sign_envelope(self.identity, type=type_, session=session, to=to, seq=seq, prev=prev, body=body,
-                             now=self.clock())
+                             now=self.clock(), version="0.2")
 
     def error(self, code: str, to: str = "") -> bytes:
         try:
@@ -79,7 +79,7 @@ class TesseraEndpoint:
 
     def card(self) -> bytes:
         return encode(self._sign("card", to="", seq=0, prev="",
-                                 body={"agent_id": self.identity.agent_id, "name": self.name, "versions": [VERSION],
+                                 body={"agent_id": self.identity.agent_id, "name": self.name, "versions": ["0.2"],
                                        "kx": self.kx_public}))
 
     def handle(self, raw: bytes, *, e: str | None = None, f: str | None = None) -> bytes:

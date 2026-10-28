@@ -18,12 +18,12 @@ YAML = "name: a\nmodel:\n  id: org/model\ncompartments: [demo]\n"
 def session_record():
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    hello = sign_envelope(B, type="hello", session="", to=A.agent_id, seq=0, prev="",
+    hello = sign_envelope(B, version="0.2", type="hello", session="", to=A.agent_id, seq=0, prev="",
                           body={"purpose": "p", "requested_level": 1, "nonce": "n", "e": KEY}, now=now)
-    welcome = sign_envelope(A, type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(hello),
+    welcome = sign_envelope(A, version="0.2", type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(hello),
                             body={"session": "s-1", "granted_level": 1, "expires": "2030-01-01T00:00:00Z",
                                   "limits": {"asks": 5, "ask_chars": 100}, "f": KEY}, now=now)
-    ask = sign_envelope(B, type="ask", session="s-1", to=A.agent_id, seq=2, prev=envelope_hash(welcome),
+    ask = sign_envelope(B, version="0.2", type="ask", session="s-1", to=A.agent_id, seq=2, prev=envelope_hash(welcome),
                         body={"text": "What is the shared secret?"}, now=now)
     return [hello, welcome, ask]
 

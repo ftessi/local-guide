@@ -217,7 +217,7 @@ C = identity_from_seed(bytes(range(64, 96)))
 
 def signed_by_c(type_, body, session="s-1", seq=1):
     from localagent.protocol.tessera.envelope import sign_envelope
-    return encode(sign_envelope(C, type=type_, session=session, to=B.agent_id, seq=seq, prev="x" * 10,
+    return encode(sign_envelope(C, version="0.2", type=type_, session=session, to=B.agent_id, seq=seq, prev="x" * 10,
                                 body=body, now=utc_now()))
 
 
@@ -257,7 +257,7 @@ def test_a_welcome_granting_more_than_requested_is_not_connected(tmp_path):
         env = json.loads(real(raw, **kw))
         from localagent.protocol.tessera.envelope import sign_envelope
         env["body"]["granted_level"] = 2
-        return encode(sign_envelope(A, type="welcome", session=env["session"], to=env["to"], seq=env["seq"],
+        return encode(sign_envelope(A, version="0.2", type="welcome", session=env["session"], to=env["to"], seq=env["seq"],
                                     prev=env["prev"], body=env["body"], now=utc_now()))
 
     endpoint.endpoint.handle = handle

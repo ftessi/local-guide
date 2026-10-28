@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera import seal
 from localagent.protocol.tessera.canonical import canonical
-from localagent.protocol.tessera.envelope import VERSION, encode, envelope_hash, sign_envelope
+from localagent.protocol.tessera.envelope import encode, envelope_hash, sign_envelope
 
 SEED_A = bytes(range(32))
 SEED_B = bytes(range(32, 64))
@@ -26,7 +26,7 @@ def build_vectors() -> dict:
     items, envs = [], {}
 
     def add(name: str, identity, **fields) -> dict:
-        env = sign_envelope(identity, now=TIME, **fields)
+        env = sign_envelope(identity, now=TIME, version="0.2", **fields)
         signed = canonical({k: v for k, v in env.items() if k != "sig"}).decode("utf-8")
         items.append({"name": name, "envelope": env, "signed_bytes": signed, "hash": envelope_hash(env),
                       "canonical": encode(env).decode("utf-8")})
@@ -34,7 +34,7 @@ def build_vectors() -> dict:
         return env
 
     add("card", a, type="card", session="", to="", seq=0, prev="",
-        body={"agent_id": a.agent_id, "name": "Ana's agent", "versions": [VERSION], "kx": x25519_public(kx_a)})
+        body={"agent_id": a.agent_id, "name": "Ana's agent", "versions": ["0.2"], "kx": x25519_public(kx_a)})
     hello = add("hello", b, type="hello", session="", to=a.agent_id, seq=0, prev="",
                 body={"purpose": "Review contract v3", "requested_level": 1,
                       "nonce": "00112233445566778899aabbccddeeff", "e": x25519_public(e_b)})
@@ -56,7 +56,7 @@ def build_vectors() -> dict:
     packages = [("hello", hello_raw), ("welcome", welcome_raw),
                 ("ask", seal.seal_msg(asker_keys, seal.TO_AGENT, 1, HANDLE, encode(ask))),
                 ("answer", seal.seal_msg(agent_keys, seal.TO_ASKER, 1, HANDLE, encode(answer)))]
-    return {"tessera": VERSION,
+    return {"tessera": "0.2",
             "keys": {"A": {"seed_hex": SEED_A.hex(), "agent_id": a.agent_id},
                      "B": {"seed_hex": SEED_B.hex(), "agent_id": b.agent_id}},
             "x25519": {name: {"seed_hex": seed.hex(), "public": x25519_public(x25519_from_seed(seed))}

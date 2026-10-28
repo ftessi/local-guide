@@ -49,7 +49,7 @@ class TesseraClient:
 
     def _sign(self, type_: str, body: dict, *, session: str, seq: int, prev: str) -> dict:
         return sign_envelope(self.identity, type=type_, session=session, to=self.remote_id, seq=seq, prev=prev,
-                             body=body, now=self._clock())
+                             body=body, now=self._clock(), version="0.2")
 
     def _check(self, env: dict, *, anyone: bool = False) -> dict:
         """A reply must come from the agent we asked and be addressed to us ('' allowed for clear errors)."""

@@ -90,13 +90,15 @@ def test_bodies_per_type():
           ("welcome", {"session": "s-1", "granted_level": 1, "expires": "2026-10-11T13:00:00Z",
                        "limits": {"asks": 50, "ask_chars": 1000}, "f": KEY})]
     for type_, body in ok:
-        env = sign_envelope(A, type=type_, session="", to=B.agent_id, seq=1, prev="", body=body, now=NOW)
+        env = sign_envelope(A, type=type_, session="", to=B.agent_id, seq=1, prev="", body=body, now=NOW,
+                            version="0.2")
         assert decode(encode(env), NOW)["type"] == type_
     bad = [("answer", {"text": "A.", "binding": True}), ("error", {"code": "oops"}),
            ("welcome", {"session": "s-1", "granted_level": 1, "expires": "2026-10-11T13:00:00Z",
                         "limits": {"asks": 50}, "f": KEY})]
     for type_, body in bad:
-        env = sign_envelope(A, type=type_, session="", to=B.agent_id, seq=1, prev="", body=body, now=NOW)
+        env = sign_envelope(A, type=type_, session="", to=B.agent_id, seq=1, prev="", body=body, now=NOW,
+                            version="0.2")
         assert code_of(encode(env)) == "malformed"
 
 
@@ -159,9 +161,9 @@ def test_chain():
     chain.append(w)
     assert chain.next_seq() == 2 and chain.last_hash() == envelope_hash(w)
     late = sign_envelope(B, type="ask", session="s-1", to=A.agent_id, seq=3, prev=envelope_hash(w),
-                         body={"text": "Q"}, now=NOW)
+                         body={"text": "Q"}, now=NOW, version="0.2")
     wrong_prev = sign_envelope(B, type="ask", session="s-1", to=A.agent_id, seq=2, prev=envelope_hash(h),
-                               body={"text": "Q"}, now=NOW)
+                               body={"text": "Q"}, now=NOW, version="0.2")
     for env in (late, wrong_prev):
         with pytest.raises(EnvelopeError) as e:
             chain.append(env)
@@ -190,3 +192,47 @@ def test_inner_messages_are_capped_below_the_package_limit():
     big = hello(body={"purpose": "x", "requested_level": 1, "nonce": "n", "e": KEY})
     raw = encode(big)
     assert code_of(raw + b" " * (INNER_MAX - len(raw) + 1)) == "too_large"
+
+
+def ask(body, version="0.3"):
+    return sign_envelope(B, type="ask", session="s-1", to=A.agent_id, seq=2, prev="", body=body, now=NOW,
+                         version=version)
+
+
+def test_v03_ask_needs_mandates_and_reply_bytes():
+    assert code_of(encode(ask({"text": "Q"}))) == "malformed"
+    env = ask({"text": "Q", "mandates": [], "reply_bytes": 0})
+    assert decode(encode(env), NOW)["tessera"] == "0.3"
+
+
+def test_v02_ask_still_decodes():
+    assert decode(encode(ask({"text": "Q"}, version="0.2")), NOW)["body"] == {"text": "Q"}
+
+
+def test_v03_answer_carries_calls():
+    env = sign_envelope(A, type="answer", session="s-1", to=B.agent_id, seq=3, prev="",
+                        body={"text": "A", "binding": False, "calls": []}, now=NOW)
+    assert decode(encode(env), NOW)["body"]["calls"] == []
+    env = sign_envelope(A, type="answer", session="s-1", to=B.agent_id, seq=3, prev="",
+                        body={"text": "A", "binding": False, "calls": {}}, now=NOW)
+    assert code_of(encode(env)) == "malformed"
+
+
+def test_card_is_signed_as_v02():
+    from localagent.protocol.tessera.envelope import CARD_VERSION, VERSION, WIRE_VERSIONS
+    assert CARD_VERSION == "0.2" and VERSION == "0.3" and WIRE_VERSIONS == ("0.2", "0.3")
+
+
+def test_check_signed_ignores_time():
+    from localagent.protocol.tessera.envelope import check_signed
+    env = hello(now=NOW - timedelta(hours=1))
+    assert check_signed(env) == env
+    assert code_of(encode(env)) == "stale"
+    with pytest.raises(EnvelopeError) as e:
+        check_signed({**env, "seq": 5})
+    assert e.value.code == "bad_signature"
+
+
+def test_reply_bytes_is_a_non_negative_int():
+    for value in (-1, True):
+        assert code_of(encode(ask({"text": "Q", "mandates": [], "reply_bytes": value}))) == "malformed"

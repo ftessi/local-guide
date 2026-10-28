@@ -29,14 +29,14 @@ def company_key(monkeypatch):
 
 def record(sid, *, closed=True, expires="2030-01-01T00:00:00Z", me=None):
     me = me or A
-    hello = sign_envelope(B, type="hello", session="", to=me.agent_id, seq=0, prev="",
+    hello = sign_envelope(B, version="0.2", type="hello", session="", to=me.agent_id, seq=0, prev="",
                           body={"purpose": "p", "requested_level": 1, "nonce": "n", "e": EKEY}, now=NOW)
-    welcome = sign_envelope(me, type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(hello),
+    welcome = sign_envelope(me, version="0.2", type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(hello),
                             body={"session": sid, "granted_level": 1, "expires": expires,
                                   "limits": {"asks": 5, "ask_chars": 100}, "f": EKEY}, now=NOW)
     envs = [hello, welcome]
     if closed:
-        envs.append(sign_envelope(B, type="close", session=sid, to=me.agent_id, seq=2,
+        envs.append(sign_envelope(B, version="0.2", type="close", session=sid, to=me.agent_id, seq=2,
                                   prev=envelope_hash(welcome), body={}, now=NOW))
     return envs
 
