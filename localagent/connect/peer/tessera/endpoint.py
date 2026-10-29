@@ -192,7 +192,8 @@ class TesseraEndpoint:
             except EnvelopeError as e:
                 self.protocol.audit.log("tessera_chain_refused", peer=s.peer, reason=str(e))
                 return self.error("not_allowed", s.peer)
-            if not self.protocol.chain_allowed(ids, public=s.public, via=s.peer):
+            # Judged by how this endpoint answers strangers, not by how the caller itself was let in.
+            if not self.protocol.chain_allowed(ids, public=self.public, via=s.peer):
                 return self.error("not_allowed", s.peer)
         origin = ids[0] if ids else s.peer
         if s.origin is not None and origin != s.origin:  # a session never answers for two people

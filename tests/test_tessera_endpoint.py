@@ -486,3 +486,10 @@ def test_answer_with_report_fits(side):
     answer = decode(raw, NOW)
     assert len(raw) <= INNER_MAX and answer["type"] == "answer" and len(answer["body"]["calls"]) == MAX_CALLS
     assert answer["body"]["text"].startswith("y")
+
+
+def test_public_endpoint_judges_the_chain_as_public_even_for_an_accepted_caller(public_side):
+    _, chain = open_session(public_side, version="0.3")  # B is accepted: not a public session
+    public_side.backend.replies = ["For a stranger."]
+    assert asked(public_side, chain, ask03(chain, mandates=mandates_for(P)))["type"] == "answer"
+    assert public_side.protocol.requests() == []
