@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 from localagent.protocol.identity import AGENT_ID_RE, b64url, verify
 from localagent.protocol.tessera.canonical import CanonicalError, canonical
 
-VERSION = "0.2"
+VERSION = "0.3"
+WIRE_VERSIONS = ("0.2", "0.3")
+CARD_VERSION = "0.2"  # cards stay 0.2 envelopes, so v0.2 clients still read them
 MAX_BYTES = 64 * 1024  # a whole package on the wire (seal.py)
 INNER_MAX = 46 * 1024  # the signed message inside it: base64 of this still fits a package
 CLOCK_SKEW = timedelta(minutes=5)
@@ -28,7 +30,9 @@ BODIES = {
 BODIES_V01 = {**BODIES, "hello": {"purpose": str, "requested_level": int, "nonce": str},
               "welcome": {"session": str, "granted_level": int, "expires": str, "limits": dict}, "refuse": {},
               "card": {"agent_id": str, "name": str, "versions": list}}
-SHAPES = {"0.2": BODIES, "0.1": BODIES_V01}  # 0.1 only for records written before v0.2
+BODIES_V03 = {**BODIES, "ask": {"text": str, "mandates": list, "reply_bytes": int},
+              "answer": {"text": str, "binding": bool, "calls": list}, "mandate": {"expires": str}}
+SHAPES = {"0.3": BODIES_V03, "0.2": BODIES, "0.1": BODIES_V01}  # 0.1 only for records written before v0.2
 TEXT_LIMITS = {"purpose": 200, "nonce": 64, "session": 64, "expires": 20, "name": 100, "code": 32, "agent_id": 43, "e": 43, "f": 43, "kx": 43}
 
 
@@ -58,8 +62,8 @@ def envelope_hash(env: dict) -> str:
 
 
 def sign_envelope(identity, *, type: str, session: str, to: str, seq: int, prev: str, body: dict,
-                  now: datetime) -> dict:
-    env = {"tessera": VERSION, "type": type, "session": session, "from": identity.agent_id, "to": to,
+                  now: datetime, version: str = VERSION) -> dict:
+    env = {"tessera": version, "type": type, "session": session, "from": identity.agent_id, "to": to,
            "seq": seq, "prev": prev, "time": format_time(now), "body": body}
     env["sig"] = identity.sign(canonical(env))
     return env
@@ -69,7 +73,7 @@ def _is(value, kind) -> bool:
     return isinstance(value, kind) and not (kind is int and isinstance(value, bool))
 
 
-def check_shape(env, versions=(VERSION,)) -> None:
+def check_shape(env, versions=WIRE_VERSIONS) -> None:
     def bad(why: str):
         raise EnvelopeError("malformed", why)
 
@@ -111,7 +115,9 @@ def check_shape(env, versions=(VERSION,)) -> None:
     if t == "welcome" and (set(body["limits"]) != {"asks", "ask_chars"}
                            or not all(_is(v, int) and v >= 0 for v in body["limits"].values())):
         bad("limits are {asks, ask_chars}, both integers")
-    if t == "welcome":
+    if t == "ask" and "reply_bytes" in body and body["reply_bytes"] < 0:
+        bad("'reply_bytes' must be ≥ 0")
+    if t in ("welcome", "mandate"):
         try:
             parse_time(body["expires"])
         except ValueError:
@@ -137,7 +143,19 @@ def _no_constants(name):
     raise ValueError(f"{name} is not JSON")
 
 
-def decode(raw: bytes, now: datetime) -> dict:
+def check_signed(env, versions=WIRE_VERSIONS) -> dict:
+    """Shape and signature only, no clock: for envelopes carried inside others (mandates, reported calls)."""
+    check_shape(env, versions)
+    try:
+        signed = canonical({k: v for k, v in env.items() if k != "sig"})
+    except CanonicalError as e:
+        raise EnvelopeError("malformed", str(e)) from None
+    if not verify(env["from"], signed, env["sig"]):
+        raise EnvelopeError("bad_signature", "the signature doesn't match the sender")
+    return env
+
+
+def decode(raw: bytes, now: datetime, versions=WIRE_VERSIONS) -> dict:
     """Bytes to a checked envelope: size, JSON, shape, signature, time. Chain and session checks are the caller's."""
     if len(raw) > INNER_MAX:
         raise EnvelopeError("too_large", f"envelopes are at most {INNER_MAX} bytes")
@@ -145,13 +163,7 @@ def decode(raw: bytes, now: datetime) -> dict:
         env = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicate_keys, parse_constant=_no_constants)
     except (UnicodeDecodeError, ValueError, RecursionError):
         raise EnvelopeError("malformed", "not a JSON object") from None
-    check_shape(env)
-    try:
-        signed = canonical({k: v for k, v in env.items() if k != "sig"})
-    except CanonicalError as e:
-        raise EnvelopeError("malformed", str(e)) from None
-    if not verify(env["from"], signed, env["sig"]):
-        raise EnvelopeError("bad_signature", "the signature doesn't match the sender")
+    check_signed(env, versions)
     if abs(parse_time(env["time"]) - now) > CLOCK_SKEW:
         raise EnvelopeError("stale", "the envelope's time is more than 5 minutes from ours")
     return env

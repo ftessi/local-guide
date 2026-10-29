@@ -240,3 +240,24 @@ def test_the_link_refuses_a_huge_answer_from_the_relay():
     wait_for(lambda: len(pauses) >= 1)
     link.stop()
     assert calls == []
+
+
+def test_relay_link_registers_public_flag():
+    bodies = []
+    answers = iter([FakeResponse(json.dumps({"nonce": "n"}).encode()),
+                    FakeResponse(json.dumps({"token": "t", "address": "http://r/a/x"}).encode())])
+
+    def opener(request, timeout=None):
+        if request.data:
+            bodies.append(json.loads(request.data))
+        try:
+            return next(answers)
+        except StopIteration:
+            raise URLError("down") from None
+
+    link = RelayLink(FakeEndpoint(), ANA, "http://r", name="x", public=True, say=lambda t: None,
+                     pause=lambda s: None, opener=opener)
+    link.start()
+    wait_for(lambda: bodies)
+    link.stop()
+    assert bodies[0]["public"] is True and bodies[0]["listed"] is False

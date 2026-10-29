@@ -10,6 +10,7 @@ from localagent.protocol.guard import Protocol
 from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera.chain import Chain, verify_record
 from localagent.protocol.tessera.envelope import decode, encode, sign_envelope
+from localagent.protocol.tessera.mandate import sign_mandate
 from localagent.testing import FakeBackend
 
 A = identity_from_seed(bytes(range(32)))
@@ -46,14 +47,14 @@ def send(side, env):
     return decode(raw, side.clock()) if raw else None
 
 
-def hello(who=B, level=1):
-    return sign_envelope(who, type="hello", session="", to=A.agent_id, seq=0, prev="",
+def hello(who=B, level=1, version="0.2"):
+    return sign_envelope(who, version=version, type="hello", session="", to=A.agent_id, seq=0, prev="",
                          body={"purpose": "Review contract v3", "requested_level": level, "nonce": "n1", "e": EKEY}, now=NOW)
 
 
-def open_session(side):
+def open_session(side, version="0.2"):
     side.protocol.accept_peer(B.agent_id, name="Bob")
-    h = hello()
+    h = hello(version=version)
     w = send(side, h)
     chain = Chain()
     chain.append(h)
@@ -61,9 +62,9 @@ def open_session(side):
     return w, chain
 
 
-def next_env(chain, type_, body, who=B, session=None, now=NOW):
+def next_env(chain, type_, body, who=B, session=None, now=NOW, version=None):
     sid = session if session is not None else chain.envelopes[1]["body"]["session"]
-    return sign_envelope(who, type=type_, session=sid, to=A.agent_id, seq=chain.next_seq(),
+    return sign_envelope(who, version=version or chain.envelopes[0]["tessera"], type=type_, session=sid, to=A.agent_id, seq=chain.next_seq(),
                          prev=chain.last_hash(), body=body, now=now)
 
 
@@ -112,7 +113,7 @@ def test_protocol_errors(side):
     ask = next_env(chain, "ask", {"text": "Q?"})
     tampered = {**ask, "body": {"text": "Other?"}}
     assert send(side, tampered)["body"]["code"] == "bad_signature"
-    wrong_seq = sign_envelope(B, type="ask", session=sid, to=A.agent_id, seq=5, prev=chain.last_hash(),
+    wrong_seq = sign_envelope(B, version="0.2", type="ask", session=sid, to=A.agent_id, seq=5, prev=chain.last_hash(),
                               body={"text": "Q?"}, now=NOW)
     assert send(side, wrong_seq)["body"]["code"] == "bad_chain"
     assert send(side, next_env(chain, "answer", {"text": "x", "binding": False}))["body"]["code"] == "not_allowed"
@@ -120,7 +121,7 @@ def test_protocol_errors(side):
     assert send(side, next_env(chain, "ask", {"text": "Q?"}, session="s-nope"))["body"]["code"] == "expired"
     stale = next_env(chain, "ask", {"text": "Q?"}, now=NOW - timedelta(minutes=6))
     assert send(side, stale)["body"]["code"] == "stale"
-    elsewhere = sign_envelope(B, type="ask", session=sid, to=C.agent_id, seq=chain.next_seq(),
+    elsewhere = sign_envelope(B, version="0.2", type="ask", session=sid, to=C.agent_id, seq=chain.next_seq(),
                               prev=chain.last_hash(), body={"text": "Q?"}, now=NOW)
     assert send(side, elsewhere)["body"]["code"] == "not_allowed"
     error = send(side, wrong_seq)
@@ -181,7 +182,8 @@ def test_card_reveals_nothing_about_connections(side):
     open_session(side)
     card = decode(side.endpoint.card(), NOW)
     assert card["type"] == "card" and card["body"] == {"agent_id": A.agent_id, "name": "Ana's agent",
-                                                       "versions": ["0.2"], "kx": KX}
+                                                       "versions": ["0.2", "0.3"], "kx": KX}
+    assert card["tessera"] == "0.2"
     assert "demo" not in json.dumps(card) and B.agent_id not in json.dumps(card)
 
 
@@ -194,7 +196,7 @@ def test_undecodable_bytes_get_an_error_addressed_to_nobody(side):
 
 
 def test_a_hello_must_start_at_seq_zero(side):
-    h = sign_envelope(B, type="hello", session="", to=A.agent_id, seq=1, prev="",
+    h = sign_envelope(B, version="0.2", type="hello", session="", to=A.agent_id, seq=1, prev="",
                       body={"purpose": "Review contract v3", "requested_level": 1, "nonce": "n1", "e": EKEY}, now=NOW)
     assert send(side, h)["body"]["code"] == "bad_chain"
 
@@ -237,7 +239,7 @@ def test_a_failed_hello_record_opens_no_session(side, monkeypatch):
     monkeypatch.setattr(side.protocol, "record_envelope", fail)
     assert send(side, hello())["body"]["code"] == "unavailable"
     for session in ("", "s-" + "0" * 16):
-        ask = sign_envelope(B, type="ask", session=session, to=A.agent_id, seq=2, prev="",
+        ask = sign_envelope(B, version="0.2", type="ask", session=session, to=A.agent_id, seq=2, prev="",
                             body={"text": "Q?"}, now=NOW)
         assert send(side, ask)["body"]["code"] == "expired"
 
@@ -258,3 +260,236 @@ def test_a_hello_whose_one_time_key_differs_from_the_package_is_refused(side):
     ask = next_env(chain, "ask", {"text": "q"})
     reply = decode(side.endpoint.handle(encode(ask), e=EKEY, f=KX), side.clock())
     assert reply["type"] == "error" and reply["body"]["code"] == "malformed"  # a hello package carries only a hello
+
+
+# ── Public mode: strangers through the relay ───────────────────────────────
+
+@pytest.fixture
+def public_side(side):
+    side.endpoint = TesseraEndpoint(A, side.protocol, side.endpoint.agent, name="Ana's agent", kx_public=KX,
+                                    clock=side.clock, max_asks=2, max_ask_chars=50, public=True)
+    return side
+
+
+def public_session(side, who=B):
+    h = hello(who)
+    w = send(side, h)
+    chain = Chain()
+    chain.append(h)
+    chain.append(w)
+    return w, chain
+
+
+def test_public_endpoint_welcomes_strangers(public_side):
+    w, _ = public_session(public_side)
+    assert w["type"] == "welcome" and w["body"]["granted_level"] == 1
+    assert public_side.protocol.public_sessions() == {f"{B.agent_id}/{w['body']['session']}"}
+    assert public_side.protocol.requests() == []
+
+
+def test_non_public_endpoint_still_refuses_strangers(side):
+    assert send(side, hello())["type"] == "refuse"
+    assert [r["id"] for r in side.protocol.requests()] == [B.agent_id]
+    assert side.protocol.public_sessions() == set()
+
+
+def test_public_endpoint_refuses_rejected_peer(public_side):
+    public_side.protocol.reject_request(B.agent_id)
+    assert send(public_side, hello())["type"] == "refuse"
+
+
+def test_accepted_peer_on_public_endpoint_is_not_a_public_session(public_side):
+    w, _ = open_session(public_side)
+    assert w["type"] == "welcome" and public_side.protocol.public_sessions() == set()
+
+
+def test_public_session_ask_answered_and_rejection_applies_mid_session(public_side):
+    public_side.backend.replies = ["Hi there.", "Again."]
+    w, chain = public_session(public_side)
+    ask = next_env(chain, "ask", {"text": "Hello?"})
+    reply = send(public_side, ask)
+    assert reply["type"] == "answer" and reply["body"]["text"] == "Hi there."
+    chain.append(ask)
+    chain.append(reply)
+    public_side.protocol.reject_request(B.agent_id)
+    reply = send(public_side, next_env(chain, "ask", {"text": "Still there?"}))
+    assert reply["type"] == "error" and reply["body"]["code"] == "not_allowed"
+
+
+# ── v0.3: mandate chains, one origin per session, reply budgets ─────────────
+
+P = identity_from_seed(bytes([7]) * 32)
+Q = identity_from_seed(bytes([8]) * 32)
+
+
+def mandates_for(origin, via=B, me=A):
+    first = sign_mandate(origin, to=via.agent_id, before=None, now=NOW)
+    return [first, sign_mandate(via, to=me.agent_id, before=first, now=NOW)]
+
+
+def ask03(chain, text="Q?", mandates=None, reply_bytes=0):
+    return next_env(chain, "ask", {"text": text, "mandates": mandates or [], "reply_bytes": reply_bytes})
+
+
+def asked(side, chain, env):
+    reply = send(side, env)
+    if reply["type"] != "error":
+        chain.append(env)
+        chain.append(reply)
+    return reply
+
+
+def test_v02_hello_gets_v02_session(side):
+    welcome, chain = open_session(side)
+    side.backend.replies = ["Fine."]
+    answer = send(side, next_env(chain, "ask", {"text": "Q?"}))
+    assert welcome["tessera"] == "0.2" and answer["tessera"] == "0.2" and answer["body"] == {"text": "Fine.",
+                                                                                            "binding": False}
+
+
+def test_v03_session_replies_in_v03(side):
+    welcome, chain = open_session(side, version="0.3")
+    side.backend.replies = ["Fine."]
+    answer = send(side, ask03(chain))
+    assert welcome["tessera"] == "0.3" and answer["tessera"] == "0.3"
+    assert answer["body"] == {"text": "Fine.", "binding": False, "calls": []}
+
+
+def test_mixed_versions_in_a_session_rejected(side):
+    _, chain = open_session(side, version="0.3")
+    assert send(side, next_env(chain, "ask", {"text": "Q?"}, version="0.2"))["body"]["code"] == "malformed"
+    _, chain = open_session(side)
+    old_style = next_env(chain, "ask", {"text": "Q?", "mandates": [], "reply_bytes": 0}, version="0.3")
+    assert send(side, old_style)["body"]["code"] == "malformed"
+    assert side.backend.calls == []
+
+
+def test_card_lists_both_versions_signed_v02(side):
+    card = decode(side.endpoint.card(), NOW)
+    assert card["tessera"] == "0.2" and card["body"]["versions"] == ["0.2", "0.3"]
+
+
+def test_chain_checked(side):
+    _, chain = open_session(side, version="0.3")
+    side.protocol.accept_peer(P.agent_id, name="Pat")
+    side.backend.replies = ["For Pat."]
+    assert asked(side, chain, ask03(chain, mandates=mandates_for(P)))["type"] == "answer"
+    _, chain = open_session(side, version="0.3")
+    assert asked(side, chain, ask03(chain, mandates=mandates_for(Q)))["body"]["code"] == "not_allowed"
+    assert [(r["id"], r["purpose"]) for r in side.protocol.requests()] == [(Q.agent_id, f"via {B.agent_id}")]
+    side.backend.replies = ["Still open."]
+    assert asked(side, chain, ask03(chain))["type"] == "answer"  # a refused chain leaves the session open
+
+
+def test_forged_chain_not_allowed(side):
+    _, chain = open_session(side, version="0.3")
+    side.protocol.accept_peer(P.agent_id, name="Pat")
+    claimed = {**sign_mandate(B, to=B.agent_id, before=None, now=NOW), "from": P.agent_id}  # B claims to be P
+    forged = [claimed, sign_mandate(B, to=A.agent_id, before=claimed, now=NOW)]
+    assert send(side, ask03(chain, mandates=forged))["body"]["code"] == "not_allowed"
+    wrong_caller = mandates_for(P, via=C)  # a chain that ends at C → A, sent by B
+    side.protocol.accept_peer(C.agent_id, name="Carol")
+    assert send(side, ask03(chain, mandates=wrong_caller))["body"]["code"] == "not_allowed"
+    assert side.backend.calls == []
+
+
+def test_origin_cannot_change_in_a_session(side):
+    _, chain = open_session(side, version="0.3")
+    for who in (P, Q):
+        side.protocol.accept_peer(who.agent_id, name="x")
+    side.backend.replies = ["For P.", "For Q."]
+    assert asked(side, chain, ask03(chain, mandates=mandates_for(P)))["type"] == "answer"
+    assert asked(side, chain, ask03(chain, mandates=mandates_for(Q)))["body"]["code"] == "not_allowed"
+    assert asked(side, chain, ask03(chain))["body"]["code"] == "not_allowed"  # no chain: the origin is B itself
+    assert len(side.backend.calls) == 1
+
+
+def test_reply_bytes_caps_the_answer(side):
+    _, chain = open_session(side, version="0.3")
+    side.backend.replies = ["x" * 20000]
+    raw = side.endpoint.handle(encode(ask03(chain, reply_bytes=2000)))
+    assert len(raw) <= 2000 and decode(raw, NOW)["type"] == "answer"
+    _, chain = open_session(side, version="0.3")
+    assert send(side, ask03(chain, reply_bytes=300))["body"]["code"] == "limit"
+
+
+def test_public_chain_through_relay_endpoint(public_side):
+    h = hello(version="0.3")
+    w = send(public_side, h)
+    chain = Chain()
+    chain.append(h)
+    chain.append(w)
+    public_side.backend.replies = ["Hello stranger."]
+    assert asked(public_side, chain, ask03(chain, mandates=mandates_for(P)))["type"] == "answer"
+    public_side.protocol.reject_request(Q.agent_id)
+    h = hello(version="0.3")
+    w = send(public_side, h)
+    chain = Chain()
+    chain.append(h)
+    chain.append(w)
+    assert asked(public_side, chain, ask03(chain, mandates=mandates_for(Q)))["body"]["code"] == "not_allowed"
+    assert public_side.protocol.requests() == []
+
+
+# ── delegate: the lead's endpoint hands a delegation to the agent and reports its calls ──
+
+class SpyDelegator:
+    def __init__(self, report=()):
+        self.started, self.report = [], list(report)
+
+    def start(self, chain, origin, budget):
+        self.started.append((chain, origin, budget))
+        return SimpleNamespace(agents=[("pricing", "Prices")], ask=lambda name, q: "49", report=lambda: self.report)
+
+
+def delegating(side, delegator):
+    side.endpoint.delegator = delegator
+    got = []
+    real = side.endpoint.agent.answer_peer
+
+    def answer_peer(session, question, history, delegation=None):
+        got.append(delegation)
+        return real(session, question, history)
+
+    side.endpoint.agent.answer_peer = answer_peer
+    return got
+
+
+def test_ask_without_chain_never_delegates(side):
+    delegator = SpyDelegator()
+    got = delegating(side, delegator)
+    _, chain = open_session(side)
+    side.backend.replies = ["One.", "Two.", "Three."]
+    asked(side, chain, next_env(chain, "ask", {"text": "Q?"}))
+    _, chain = open_session(side, version="0.3")
+    asked(side, chain, ask03(chain))
+    assert got == [None, None] and delegator.started == []
+    side.protocol.accept_peer(P.agent_id, name="Pat")
+    _, chain = open_session(side, version="0.3")
+    asked(side, chain, ask03(chain, mandates=mandates_for(P), reply_bytes=30000))
+    assert got[-1] is not None
+    (started,) = delegator.started
+    assert started[1] == P.agent_id and started[2] == 30000 and len(started[0]) == 2
+
+
+def test_answer_with_report_fits(side):
+    from localagent.connect.peer.tessera.delegation import ASK_RESERVE, MAX_CALLS, call_bytes
+    from localagent.protocol.tessera.envelope import INNER_MAX
+    share = ASK_RESERVE + call_bytes(INNER_MAX)
+    item = {"agent": C.agent_id, "name": "pricing", "ask": None, "reply": None, "error": ""}
+    item["error"] = "x" * (share - len(json.dumps(item)) - 10)
+    delegating(side, SpyDelegator(report=[item] * MAX_CALLS))
+    side.protocol.accept_peer(P.agent_id, name="Pat")
+    _, chain = open_session(side, version="0.3")
+    side.backend.replies = ["y" * 20000]
+    raw = side.endpoint.handle(encode(ask03(chain, mandates=mandates_for(P))))
+    answer = decode(raw, NOW)
+    assert len(raw) <= INNER_MAX and answer["type"] == "answer" and len(answer["body"]["calls"]) == MAX_CALLS
+    assert answer["body"]["text"].startswith("y")
+
+
+def test_public_endpoint_judges_the_chain_as_public_even_for_an_accepted_caller(public_side):
+    _, chain = open_session(public_side, version="0.3")  # B is accepted: not a public session
+    public_side.backend.replies = ["For a stranger."]
+    assert asked(public_side, chain, ask03(chain, mandates=mandates_for(P)))["type"] == "answer"
+    assert public_side.protocol.requests() == []

@@ -109,9 +109,30 @@ class Protocol:
         level = min(requested_level, entry.level)
         return PeerEntry(entry.name, level) if level >= 1 else None
 
-    def open_peer_session(self, agent_id: str) -> Session:
+    def public_grant(self, agent_id: str) -> PeerEntry | None:
+        """A public agent (connections.tessera `public: true`) answers strangers that come through the relay at level 1.
+        Never a request for the owner; a rejected or removed id stays refused."""
+        if not isinstance(agent_id, str) or not AGENT_ID_RE.fullmatch(agent_id) or self.connection() is None:
+            return None
+        if self._latest_requests().get(agent_id, {}).get("status") == "rejected":
+            return None
+        return PeerEntry("public", 1)
+
+    def chain_allowed(self, ids: list[str], *, public: bool, via: str) -> bool:
+        """A delegated ask (v0.3): every id in its mandate chain must be allowed as if it had asked directly, the
+        same way. Unknown ids become requests for the owner, but only when this agent isn't public."""
+        refused = [i for i in ids if self.peer_grant(i, 1) is None and not (public and self.public_grant(i))]
+        for agent_id in refused:
+            if not public:
+                self.record_request(agent_id, f"via {via}", 1)
+            self.audit.log("tessera_chain_refused", peer=agent_id, via=via)
+        return not refused
+
+    def open_peer_session(self, agent_id: str, *, public: bool = False) -> Session:
         """A peer gets the connection's adapter and its own memory. No tools, no knowledge, no work, ever."""
         entry = self.peer_grant(agent_id, 1)
+        if entry is None and public:
+            entry = self.public_grant(agent_id)
         if entry is None:
             self.audit.log("auth_failed", principal=f"peer:{agent_id}", reason="not an accepted peer")
             raise AuthError("Not an accepted peer")
@@ -174,6 +195,13 @@ class Protocol:
         self._save(peers)
         self._set_request_status(agent_id, "rejected")  # so a removed peer cannot queue itself again
         self.audit.log("tessera_peer_removed", peer=agent_id)
+
+    def mark_public_session(self, peer: str, session_id: str) -> None:
+        """Remembers that a session was opened in public mode, not by the owner's acceptance."""
+        self._append("public", {"peer": peer, "session": session_id})
+
+    def public_sessions(self) -> set[str]:
+        return {f"{r.get('peer')}/{r.get('session')}" for r in self._read("public")}
 
     def record_envelope(self, other_id: str, session_id: str, envelope: dict) -> None:
         self._append(f"{other_id}/{session_id}", envelope)

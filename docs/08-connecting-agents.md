@@ -140,6 +140,8 @@ connections:
     relay: https://relay.example.com
     listed: true                         # optional: appear in the relay's public list (default: not listed)
     description: "Questions about contract v3"   # optional, shown in that list next to the agent's name
+    public: true                         # optional: anyone who comes through the relay may ask (default: off)
+    delegate: true                       # optional: may ask your saved remotes while answering (default: off)
 ```
 
 Without `host:`/`port:` no port is opened; add them to be reachable directly too. Start it as usual
@@ -150,7 +152,78 @@ reconnects by itself if the relay goes away. Give the other owner that address a
 **On their side** nothing changes: `connect <the relay address> <your id> --name acme --purpose "..."`, then `ask`,
 `/ask` or `/talk`.
 
-**The list:** `GET <relay>/agents` shows the listed agents that are connected now (id, name, description, address).
+**The list:** `GET <relay>/agents` shows the listed agents that are connected now (id, name, description, address,
+and whether they are public).
+
+**Public agents:** with `public: true`, an agent answers anyone who reaches it through the relay, at level 1 (Ask),
+without you accepting each one: people in a browser (below) and other agents alike. It needs `relay:`. Your direct
+address (`host:`/`port:`) still answers only accepted peers. Someone you rejected or removed (`peers reject`,
+`peers remove`) stays refused, public or not, from their next message on. The connection's adapter remains the
+gate: without one, a public agent refuses everything too. Each public visitor gets their own peer memory and records
+on your side, kept like any other peer's; the audit log marks these sessions `public=True`.
+
+**The browser page:** open the relay's address (`https://relay.example.com/`) in any browser. The left side is your
+workspace: the agents you keep, as cards. **+ Add agent** lists the public agents connected now, or takes an agent id
+for one you can reach (your own, or a company's that accepted you: the bottom of the board shows your browser's id
+with a **Copy** button, to give an owner for `peers accept`). **Running** shows the agents working on a question from
+this page right now; **Latest** shows the rest, most recent first, each with its last exchange ("You: …" or "asked by
+acme-lead: …"). Star (★) an agent to make it your lead: its chat opens first. Click any card to talk to that agent
+directly. When a lead asks other agents (below), each answer lists those calls under it; open one to see what was
+asked and what came back. A reply the page can't verify (not signed by that agent for that very question, or the
+question wasn't asked for you) is marked **not verified**: the lead may have changed it. On a phone the board and
+the chat take the whole screen in turn. There is no sign-in: on the first visit the browser makes
+its own Tessera key and keeps it, so an agent sees the same visitor on every visit. The browser does Tessera itself,
+end-to-end encrypted like any agent, so the relay reads nothing. Chats are kept in that browser only (its local
+storage); clearing the site's data starts fresh. Every finished chat (ended with **New chat**, closed with the tab,
+or past its expiry) is signed by the browser, sealed to the company's key and sent to the relay's inbox, and the
+page says so above every chat: *Chats are end-to-end encrypted: the relay can't read them. A sealed copy of every
+chat is sent to the Tessera company for security inspection.* If the agent's owner also has inspection mode on,
+the agent sends its own copy too (it can't tell a browser from another agent that came through the relay).
+
+## Agents asking agents (`delegate:`)
+
+With `delegate: true` under `connections.tessera`, your agent may ask other agents while it answers someone: the
+remotes you saved for it with `connect` (`tessera/remotes.yaml`). The model sees each remote's name and purpose and
+gets one tool, `agents.ask`, at most 3 times per question; nothing else is ever available to it in a peer session.
+Each call's answer comes back to the model labelled with the agent's name, and the whole list of calls goes back to
+the person with the answer, each one signed by the agent that answered, so the browser can check it. A remote can be
+kept out of this with `delegate: false` on its entry:
+
+```yaml
+# tessera-acme/tessera/remotes.yaml
+pricing:
+  address: https://relay.example.com/a/<their id>
+  id: <their id>
+  purpose: Prices and plans
+mine:
+  address: http://192.168.1.20:8100
+  id: <id>
+  purpose: My own notes agent
+  delegate: false          # only for me (ask, /ask, /talk), never called on someone else's behalf
+```
+
+**The risk, plainly:** until now, an agent answering a peer could do nothing but answer. With `delegate:` on, whoever
+asks your agent can make it send questions to your remotes. That is the point of the switch, and it is bounded:
+
+- **Every agent checks the person, and every agent on the way.** Each question carries a chain of signed *mandates*:
+  the person signs "my lead may ask for me", the lead signs "this agent may ask for my person", and so on (at most 4
+  links, each valid for 10 minutes). The agent asked checks every signature and link, then applies its own rules to
+  each one in the chain, exactly as if each had asked directly: accepted (`peers accept`), or the agent is public
+  and they came through the relay and weren't rejected. One refused link and the answer is `not_allowed`. So a
+  person you don't allow gets nothing from your agent, however many agents the question passed through, and a lead
+  can't claim to ask for someone else: the person's own signature is required. An unknown id in a chain shows up in
+  `peers` as a request "via <the agent that asked>", unless your agent is public.
+- **One person per conversation.** A lead keeps a separate conversation with each agent for each person, and an
+  agent refuses a conversation that switches to a different person, so one person's earlier questions never reach
+  another person's answer.
+- **Only what was asked for someone with a chain is passed on.** A question without a mandate chain (an old v0.2
+  agent, or a hand-made request) is answered alone; the lead never asks anyone else for it, because then nobody could
+  check who really asked. Agents that only speak v0.2 are never called on someone's behalf.
+- **Answers stay within one message.** The lead tells each agent it calls how long its answer may be (a share of the
+  space left), so its own answer, with every call it made, still fits in one Tessera message.
+
+`ask`, `/ask` and `/talk` sign the first mandate too, so your own agent can use a lead the same way a browser does.
+Delegated calls take time: each has 80 seconds, so a question with three calls fits the relay's 5-minute window.
 
 **Running a relay** (any small server; standard library only):
 
@@ -160,13 +233,19 @@ python -m localagent relay --host 0.0.0.0 --port 8200 --public-url https://relay
 
 Put HTTPS in front of it (a reverse proxy or a tunnel, page 4). `--max-agents` (default 100) limits how many agents
 are connected at once; each agent can have 8 questions waiting. Anyone holding an agent's key can connect that agent;
-there are no accounts yet.
+there are no accounts yet. Each visitor's address may send 30 messages a minute (all agents together) and 10
+inspection uploads a minute; beyond that the relay answers 429 and the page asks them to slow down. Behind your own
+proxy, add `--trusted-proxy <the proxy's address>`: the visitor's address is then read from the `X-Forwarded-For`
+header the proxy adds; without the option that header is ignored.
 
 **What the relay can and can't do:** it can't read messages (they are end-to-end encrypted), can't change or forge
 one, can't pretend to be your agent (connecting needs your agent's key), can't skip your acceptance or the adapter,
 and doesn't learn who is asking (that is inside the encrypted first message). It sees which agent is reached, when,
 and how many bytes, and it can delay or drop messages. It keeps exactly that metadata in `connections.jsonl` in its
-data folder (`--data-dir`, default `relay-data`; `--log-days`, default 90) and nothing else.
+data folder (`--data-dir`, default `relay-data`; `--log-days`, default 90) and nothing else. The relay also serves
+the browser page, so a relay you don't trust could serve altered code to browsers: use a relay you trust, over
+HTTPS. The page's crypto libraries (`localagent/relay/web/node_modules/@noble/`) are exactly the npm releases pinned
+in `package-lock.json`, and the page loads nothing from anywhere else.
 
 ## Records
 
@@ -248,6 +327,20 @@ earlier conversations to a local relay's inbox; none held the secret in plain te
 All 17 opened with the company's private key, signed by the agent; the latest was identical to the agent's own
 record (11 messages). Another key was refused. After `inspection off`, the count of sent conversations stayed at 17.
 
+Browser chat, 2026-10-23, same computer, with a fake model: a local relay with one public agent. Headless Chrome
+listed it, asked two questions and got both answers, showed the chat again after a reload, and after **New chat**
+sent the chat to the inbox. The company's private key opened that upload (signed by the browser's key, the full
+record); the sealed file didn't contain the question in plain text. Light and dark themes and a 375-pixel-wide
+window were checked. The real model and a person's browser on another computer are still to do.
+
+Workspace board and delegation, 2026-10-29, same computer, with fake models: a local relay with two public agents,
+`acme-lead` (`delegate: true`, with `pricing-bot` saved as a remote) and `pricing-bot`. Headless Chrome added both
+from the directory, starred the lead and asked it; the lead showed under **Running**, called `pricing-bot` through the
+relay, and answered with the call listed and verified. `pricing-bot` then appeared under **Latest** as "asked by
+acme-lead: …". A direct question to `pricing-bot` worked too. Light and dark themes, a 375-pixel-wide window and a
+reload (workspace kept) were checked. In the tests, three agents through a relay: when the callee's owner rejected
+the person, the lead's next call came back `not_allowed` and the lead still answered.
+
 **Not yet tested:** two separate computers over a real network (the commands are exactly the ones above, with
 `host: 0.0.0.0`).
 
@@ -257,11 +350,16 @@ record (11 messages). Another key was refused. After `inspection off`, the count
   Protecting them with a passphrase or the operating system's key store is planned.
 - **Metadata stays visible:** a relay or the network sees which agent is reached, when and how much; HTTPS in front
   of a relay hides it from the network, not from the relay.
-- **No rate limiting.** A stranger can make `tessera/requests.jsonl` grow by connecting with many new keys.
+- **Rate limits are per address, on the relay only.** A stranger can make `tessera/requests.jsonl` grow by
+  connecting directly with many new keys, and every new browser key on a public agent adds a peer memory folder.
 - **Records can differ by one final question:** if the answering side rejects a question (an error reply), the
   asking side has it in its record and the answering side doesn't.
 - An open model can be wrong. Its answers are not binding, and only what you trained into the connection's adapter
   is your shared data; anything else is the model's general knowledge.
+- **Delegation is as good as the lead's model.** A small model may not use `agents.ask` well, or ask the wrong agent;
+  pick a capable lead. Calls are made one after another, and they are shown with the answer, not live.
+- **Deep chains report less.** Every reported call must fit in the lead's one answer, so each callee gets a share of
+  the space; a callee that delegates again shares its own share.
 - The answering model may paraphrase the refusal ("Sorry, I can't help with that"); that goes out as an answer,
   without any secret in it.
 

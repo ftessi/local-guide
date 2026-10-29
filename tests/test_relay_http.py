@@ -139,7 +139,8 @@ def test_directory_route(relay_server):
     status, raw = call(relay_server, "GET", "/agents")
     assert status == 200
     assert json.loads(raw) == [{"id": ANA.agent_id, "name": "Ana", "description": "Demo answers",
-                                "address": f"http://127.0.0.1:{relay_server.port}/a/{ANA.agent_id}"}]
+                                "address": f"http://127.0.0.1:{relay_server.port}/a/{ANA.agent_id}",
+                                "public": False}]
 
 
 def test_public_url_is_used_for_addresses():
@@ -224,3 +225,106 @@ def test_inspection_inbox(tmp_path):
 
 def test_without_an_inbox_inspection_is_404(relay_server):
     assert call(relay_server, "POST", "/relay/inspection", b"x")[0] == 404
+
+
+def test_register_public_over_http(relay_server):
+    assert register(relay_server, listed=True, public=True)[0] == 200
+    assert json.loads(call(relay_server, "GET", "/agents")[1])[0]["public"] is True
+    assert register(relay_server, public="yes")[0] == 400
+
+
+def limited_server(tmp_path, **kw):
+    server = RelayServer(Relay(), "127.0.0.1", 0, poll_wait=0.2, deliver_timeout=0.5, card_timeout=0.5,
+                         inbox=tmp_path / "inbox", **kw)
+    server.start()
+    return server
+
+
+def call_from(server, method, path, body=None, forwarded=None):
+    request = Request(f"http://127.0.0.1:{server.port}{path}", data=body, method=method)
+    if forwarded:
+        request.add_header("X-Forwarded-For", forwarded)
+    try:
+        with urlopen(request, timeout=10) as response:
+            return response.status
+    except HTTPError as e:
+        return e.code
+
+
+def test_chat_posts_rate_limited_per_ip(tmp_path):
+    server = limited_server(tmp_path, chat_per_minute=2)
+    try:
+        path = f"/a/{ANA.agent_id}/tessera"
+        assert [call_from(server, "POST", path, b"x") for _ in range(3)] == [503, 503, 429]
+        assert call_from(server, "GET", f"{path}/card") == 503  # cards aren't counted
+    finally:
+        server.stop()
+
+
+def test_uploads_rate_limited(tmp_path):
+    server = limited_server(tmp_path, uploads_per_minute=1)
+    try:
+        assert [call_from(server, "POST", "/relay/inspection", b"sealed") for _ in range(2)] == [204, 429]
+    finally:
+        server.stop()
+
+
+def test_forwarded_for_ignored_without_trusted_proxy(tmp_path):
+    server = limited_server(tmp_path, uploads_per_minute=1)
+    try:
+        assert [call_from(server, "POST", "/relay/inspection", b"s", forwarded=ip)
+                for ip in ("1.1.1.1", "2.2.2.2")] == [204, 429]
+    finally:
+        server.stop()
+
+
+def test_forwarded_for_used_from_trusted_proxy(tmp_path):
+    server = limited_server(tmp_path, uploads_per_minute=1, trusted_proxy="127.0.0.1")
+    try:
+        assert [call_from(server, "POST", "/relay/inspection", b"s", forwarded=ip)
+                for ip in ("1.1.1.1", "evil, 2.2.2.2", "2.2.2.2")] == [204, 204, 429]
+    finally:
+        server.stop()
+
+
+def get(server, path):
+    try:
+        with urlopen(f"http://127.0.0.1:{server.port}{path}", timeout=10) as response:
+            return response.status, response.headers.get("Content-Type"), response.read()
+    except HTTPError as e:
+        return e.code, None, b""
+
+
+def test_index_served(relay_server):
+    status, kind, body = get(relay_server, "/")
+    assert status == 200 and kind == "text/html; charset=utf-8" and b'<script type="importmap">' in body
+
+
+def test_static_js_served_with_type(relay_server):
+    status, kind, body = get(relay_server, "/static/js/client.js")
+    assert status == 200 and kind == "text/javascript; charset=utf-8" and b"TesseraClient" in body
+    assert get(relay_server, "/static/node_modules/@noble/curves/ed25519.js")[0] == 200
+    assert get(relay_server, "/static/app.css")[1] == "text/css; charset=utf-8"
+
+
+@pytest.mark.parametrize("path", ["/static/../http.py", "/static/js/../../http.py", "/static/package.json",
+                                  "/static/js/", "/static/node_modules/@noble/curves/package.json",
+                                  "/static/node_modules/@noble/curves/src/ed25519.ts", "/static/js\client.js",
+                                  "/index.html", "/static/"])
+def test_static_refuses_traversal_and_unlisted(relay_server, path):
+    assert get(relay_server, path)[0] == 404
+
+
+def test_early_answers_read_the_body_so_the_client_sees_them(tmp_path):
+    import socket
+    server = limited_server(tmp_path, uploads_per_minute=1)
+    try:
+        assert call_from(server, "POST", "/relay/inspection", b"s") == 204
+        body = b"x" * 300_000
+        with socket.create_connection(("127.0.0.1", server.port), timeout=10) as s:
+            s.sendall(b"POST /relay/inspection HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n" % len(body))
+            time.sleep(0.3)  # the relay answers while the body is still on its way, as with a slow upload
+            s.sendall(body)
+            assert s.recv(64).startswith(b"HTTP/1.0 429")
+    finally:
+        server.stop()

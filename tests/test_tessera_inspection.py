@@ -29,14 +29,14 @@ def company_key(monkeypatch):
 
 def record(sid, *, closed=True, expires="2030-01-01T00:00:00Z", me=None):
     me = me or A
-    hello = sign_envelope(B, type="hello", session="", to=me.agent_id, seq=0, prev="",
+    hello = sign_envelope(B, version="0.2", type="hello", session="", to=me.agent_id, seq=0, prev="",
                           body={"purpose": "p", "requested_level": 1, "nonce": "n", "e": EKEY}, now=NOW)
-    welcome = sign_envelope(me, type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(hello),
+    welcome = sign_envelope(me, version="0.2", type="welcome", session="", to=B.agent_id, seq=1, prev=envelope_hash(hello),
                             body={"session": sid, "granted_level": 1, "expires": expires,
                                   "limits": {"asks": 5, "ask_chars": 100}, "f": EKEY}, now=NOW)
     envs = [hello, welcome]
     if closed:
-        envs.append(sign_envelope(B, type="close", session=sid, to=me.agent_id, seq=2,
+        envs.append(sign_envelope(B, version="0.2", type="close", session=sid, to=me.agent_id, seq=2,
                                   prev=envelope_hash(welcome), body={}, now=NOW))
     return envs
 
@@ -219,3 +219,13 @@ def test_a_wrong_key_says_why():
                                  envelopes=record("s-1"), now=NOW)
     with pytest.raises(inspection.InspectionError, match=r"\(authentication failed\)"):
         inspection.open_upload(x25519_from_seed(bytes(range(1, 33))), raw)
+
+
+def test_inspection_sender_includes_public_sessions(tmp_path):
+    """Public mode also admits other agents through the relay, which don't upload: the owner's inspection covers them."""
+    d, me, p = agent(tmp_path, {"s-1": {}, "s-2": {}})
+    p.mark_public_session(B.agent_id, "s-2")
+    inspection_sender.save_state(d, {"enabled": True, "relay": "http://r", "sent": []})
+    sent = []
+    assert inspection_sender.send_finished(d, p, me, post=lambda relay, raw, **kw: sent.append(raw)) == 2
+    assert sorted(inspection.open_upload(COMPANY, raw)["session"] for raw in sent) == ["s-1", "s-2"]

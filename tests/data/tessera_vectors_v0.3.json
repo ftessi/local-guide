@@ -1,0 +1,258 @@
+{
+  "envelopes": [
+    {
+      "canonical": "{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"}",
+      "envelope": {
+        "body": {
+          "expires": "2026-10-11T12:10:00Z"
+        },
+        "from": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+        "prev": "",
+        "seq": 0,
+        "session": "",
+        "sig": "wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA",
+        "tessera": "0.3",
+        "time": "2026-10-11T12:00:00Z",
+        "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "type": "mandate"
+      },
+      "hash": "m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE",
+      "name": "mandate_b_a",
+      "signed_bytes": "{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"}"
+    },
+    {
+      "canonical": "{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE\",\"seq\":1,\"session\":\"\",\"sig\":\"e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"mandate\"}",
+      "envelope": {
+        "body": {
+          "expires": "2026-10-11T12:10:00Z"
+        },
+        "from": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "prev": "m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE",
+        "seq": 1,
+        "session": "",
+        "sig": "e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg",
+        "tessera": "0.3",
+        "time": "2026-10-11T12:00:00Z",
+        "to": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+        "type": "mandate"
+      },
+      "hash": "onaBKjz2P97aJ4xTIkaAwzxMCz0FZYZbkPz2Q9RqUX8",
+      "name": "mandate_a_c",
+      "signed_bytes": "{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE\",\"seq\":1,\"session\":\"\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"mandate\"}"
+    },
+    {
+      "canonical": "{\"body\":{\"mandates\":[{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"}],\"reply_bytes\":0,\"text\":\"What does the pricing agent charge?\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":2,\"session\":\"s-0123456789abcdef\",\"sig\":\"a_Nie14wlfd74TfGOlCri_Y5owt-1gUnqcKrNyWZ7_Be6ygY3ZAgrZSXmZ_6AtByHz3LJ0DMMX7kogaWqDu1Cg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"ask\"}",
+      "envelope": {
+        "body": {
+          "mandates": [
+            {
+              "body": {
+                "expires": "2026-10-11T12:10:00Z"
+              },
+              "from": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "prev": "",
+              "seq": 0,
+              "session": "",
+              "sig": "wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA",
+              "tessera": "0.3",
+              "time": "2026-10-11T12:00:00Z",
+              "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+              "type": "mandate"
+            }
+          ],
+          "reply_bytes": 0,
+          "text": "What does the pricing agent charge?"
+        },
+        "from": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+        "prev": "",
+        "seq": 2,
+        "session": "s-0123456789abcdef",
+        "sig": "a_Nie14wlfd74TfGOlCri_Y5owt-1gUnqcKrNyWZ7_Be6ygY3ZAgrZSXmZ_6AtByHz3LJ0DMMX7kogaWqDu1Cg",
+        "tessera": "0.3",
+        "time": "2026-10-11T12:00:00Z",
+        "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "type": "ask"
+      },
+      "hash": "tDVnjQQeA-qbusEXwFmyrXyudwXOWBXDa81ynba1kWE",
+      "name": "ask_with_mandate",
+      "signed_bytes": "{\"body\":{\"mandates\":[{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"}],\"reply_bytes\":0,\"text\":\"What does the pricing agent charge?\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":2,\"session\":\"s-0123456789abcdef\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"ask\"}"
+    },
+    {
+      "canonical": "{\"body\":{\"mandates\":[{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"},{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE\",\"seq\":1,\"session\":\"\",\"sig\":\"e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"mandate\"}],\"reply_bytes\":6656,\"text\":\"What do you charge?\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"\",\"seq\":2,\"session\":\"s-fedcba9876543210\",\"sig\":\"ZNxD6nKd-pAGLxbr9mUAs8SsfygLxWfTzcvBB9uChqPuOi7F2ZMFqFHCz6VPlEqlPIpJC2gYNRelz7UTOKMqAA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"ask\"}",
+      "envelope": {
+        "body": {
+          "mandates": [
+            {
+              "body": {
+                "expires": "2026-10-11T12:10:00Z"
+              },
+              "from": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "prev": "",
+              "seq": 0,
+              "session": "",
+              "sig": "wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA",
+              "tessera": "0.3",
+              "time": "2026-10-11T12:00:00Z",
+              "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+              "type": "mandate"
+            },
+            {
+              "body": {
+                "expires": "2026-10-11T12:10:00Z"
+              },
+              "from": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+              "prev": "m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE",
+              "seq": 1,
+              "session": "",
+              "sig": "e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg",
+              "tessera": "0.3",
+              "time": "2026-10-11T12:00:00Z",
+              "to": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+              "type": "mandate"
+            }
+          ],
+          "reply_bytes": 6656,
+          "text": "What do you charge?"
+        },
+        "from": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "prev": "",
+        "seq": 2,
+        "session": "s-fedcba9876543210",
+        "sig": "ZNxD6nKd-pAGLxbr9mUAs8SsfygLxWfTzcvBB9uChqPuOi7F2ZMFqFHCz6VPlEqlPIpJC2gYNRelz7UTOKMqAA",
+        "tessera": "0.3",
+        "time": "2026-10-11T12:00:00Z",
+        "to": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+        "type": "ask"
+      },
+      "hash": "wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0",
+      "name": "delegated_ask",
+      "signed_bytes": "{\"body\":{\"mandates\":[{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"},{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE\",\"seq\":1,\"session\":\"\",\"sig\":\"e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"mandate\"}],\"reply_bytes\":6656,\"text\":\"What do you charge?\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"\",\"seq\":2,\"session\":\"s-fedcba9876543210\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"ask\"}"
+    },
+    {
+      "canonical": "{\"body\":{\"binding\":false,\"calls\":[],\"text\":\"49 euros a month.\"},\"from\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"prev\":\"wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0\",\"seq\":3,\"session\":\"s-fedcba9876543210\",\"sig\":\"9mQg1Z2xVHBJYVyHwogsdU2FbK_3fe6_FJHOXvhfUQmYCQiL4YvIJDwpuzyKF_bwcdOGN5Zcjjd-hMiEsxo-Dg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"answer\"}",
+      "envelope": {
+        "body": {
+          "binding": false,
+          "calls": [],
+          "text": "49 euros a month."
+        },
+        "from": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+        "prev": "wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0",
+        "seq": 3,
+        "session": "s-fedcba9876543210",
+        "sig": "9mQg1Z2xVHBJYVyHwogsdU2FbK_3fe6_FJHOXvhfUQmYCQiL4YvIJDwpuzyKF_bwcdOGN5Zcjjd-hMiEsxo-Dg",
+        "tessera": "0.3",
+        "time": "2026-10-11T12:00:00Z",
+        "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "type": "answer"
+      },
+      "hash": "LeS-p9GzHHalJKZH33pp7gK3-VktYTGfPGS0NV4gXho",
+      "name": "delegated_answer",
+      "signed_bytes": "{\"body\":{\"binding\":false,\"calls\":[],\"text\":\"49 euros a month.\"},\"from\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"prev\":\"wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0\",\"seq\":3,\"session\":\"s-fedcba9876543210\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"answer\"}"
+    },
+    {
+      "canonical": "{\"body\":{\"binding\":false,\"calls\":[{\"agent\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"ask\":{\"body\":{\"mandates\":[{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"},{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE\",\"seq\":1,\"session\":\"\",\"sig\":\"e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"mandate\"}],\"reply_bytes\":6656,\"text\":\"What do you charge?\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"\",\"seq\":2,\"session\":\"s-fedcba9876543210\",\"sig\":\"ZNxD6nKd-pAGLxbr9mUAs8SsfygLxWfTzcvBB9uChqPuOi7F2ZMFqFHCz6VPlEqlPIpJC2gYNRelz7UTOKMqAA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"ask\"},\"error\":\"\",\"name\":\"Carla's pricing agent\",\"reply\":{\"body\":{\"binding\":false,\"calls\":[],\"text\":\"49 euros a month.\"},\"from\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"prev\":\"wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0\",\"seq\":3,\"session\":\"s-fedcba9876543210\",\"sig\":\"9mQg1Z2xVHBJYVyHwogsdU2FbK_3fe6_FJHOXvhfUQmYCQiL4YvIJDwpuzyKF_bwcdOGN5Zcjjd-hMiEsxo-Dg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"answer\"}}],\"text\":\"The pricing agent charges 49 euros a month.\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"tDVnjQQeA-qbusEXwFmyrXyudwXOWBXDa81ynba1kWE\",\"seq\":3,\"session\":\"s-0123456789abcdef\",\"sig\":\"0J7zm3vA2c9y6F8AwI7JVC8ATB5YZCDKw-HWZSvOgKSiSgx_oN_IZeEdYLPtVGvAto0rpSenfRLojIlytnynDw\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"type\":\"answer\"}",
+      "envelope": {
+        "body": {
+          "binding": false,
+          "calls": [
+            {
+              "agent": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+              "ask": {
+                "body": {
+                  "mandates": [
+                    {
+                      "body": {
+                        "expires": "2026-10-11T12:10:00Z"
+                      },
+                      "from": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+                      "prev": "",
+                      "seq": 0,
+                      "session": "",
+                      "sig": "wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA",
+                      "tessera": "0.3",
+                      "time": "2026-10-11T12:00:00Z",
+                      "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+                      "type": "mandate"
+                    },
+                    {
+                      "body": {
+                        "expires": "2026-10-11T12:10:00Z"
+                      },
+                      "from": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+                      "prev": "m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE",
+                      "seq": 1,
+                      "session": "",
+                      "sig": "e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg",
+                      "tessera": "0.3",
+                      "time": "2026-10-11T12:00:00Z",
+                      "to": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+                      "type": "mandate"
+                    }
+                  ],
+                  "reply_bytes": 6656,
+                  "text": "What do you charge?"
+                },
+                "from": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+                "prev": "",
+                "seq": 2,
+                "session": "s-fedcba9876543210",
+                "sig": "ZNxD6nKd-pAGLxbr9mUAs8SsfygLxWfTzcvBB9uChqPuOi7F2ZMFqFHCz6VPlEqlPIpJC2gYNRelz7UTOKMqAA",
+                "tessera": "0.3",
+                "time": "2026-10-11T12:00:00Z",
+                "to": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+                "type": "ask"
+              },
+              "error": "",
+              "name": "Carla's pricing agent",
+              "reply": {
+                "body": {
+                  "binding": false,
+                  "calls": [],
+                  "text": "49 euros a month."
+                },
+                "from": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+                "prev": "wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0",
+                "seq": 3,
+                "session": "s-fedcba9876543210",
+                "sig": "9mQg1Z2xVHBJYVyHwogsdU2FbK_3fe6_FJHOXvhfUQmYCQiL4YvIJDwpuzyKF_bwcdOGN5Zcjjd-hMiEsxo-Dg",
+                "tessera": "0.3",
+                "time": "2026-10-11T12:00:00Z",
+                "to": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+                "type": "answer"
+              }
+            }
+          ],
+          "text": "The pricing agent charges 49 euros a month."
+        },
+        "from": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "prev": "tDVnjQQeA-qbusEXwFmyrXyudwXOWBXDa81ynba1kWE",
+        "seq": 3,
+        "session": "s-0123456789abcdef",
+        "sig": "0J7zm3vA2c9y6F8AwI7JVC8ATB5YZCDKw-HWZSvOgKSiSgx_oN_IZeEdYLPtVGvAto0rpSenfRLojIlytnynDw",
+        "tessera": "0.3",
+        "time": "2026-10-11T12:00:00Z",
+        "to": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+        "type": "answer"
+      },
+      "hash": "3T4tLOq-ikkLlmGBIS6kObQC_NI4z02TYq_-cvZTeoU",
+      "name": "answer_with_calls",
+      "signed_bytes": "{\"body\":{\"binding\":false,\"calls\":[{\"agent\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"ask\":{\"body\":{\"mandates\":[{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"prev\":\"\",\"seq\":0,\"session\":\"\",\"sig\":\"wlmSE1GreKd0bgLZbqZlLThYq84bdKg3wL100K7WHPnAGFg7Ty_xuF3BfTTkhyW-sytQD7vEvzdAEXy7UccJBA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"mandate\"},{\"body\":{\"expires\":\"2026-10-11T12:10:00Z\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"m-FYmrgGmcoBNBFm_RKduJFC4d3DNNCssBO0LglTMhE\",\"seq\":1,\"session\":\"\",\"sig\":\"e2TnMJe987hBUehN7lp0JUQ65zntDQeVbNAFdgey5FC8bguRA_wEHMmaCPpq3qPUmgy4o8ZB6M3yq63wAL5LAg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"mandate\"}],\"reply_bytes\":6656,\"text\":\"What do you charge?\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"\",\"seq\":2,\"session\":\"s-fedcba9876543210\",\"sig\":\"ZNxD6nKd-pAGLxbr9mUAs8SsfygLxWfTzcvBB9uChqPuOi7F2ZMFqFHCz6VPlEqlPIpJC2gYNRelz7UTOKMqAA\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"type\":\"ask\"},\"error\":\"\",\"name\":\"Carla's pricing agent\",\"reply\":{\"body\":{\"binding\":false,\"calls\":[],\"text\":\"49 euros a month.\"},\"from\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"prev\":\"wzYBzho4NwMXofkaTOnQth-IecVPTh_fNkRpzIjO5k0\",\"seq\":3,\"session\":\"s-fedcba9876543210\",\"sig\":\"9mQg1Z2xVHBJYVyHwogsdU2FbK_3fe6_FJHOXvhfUQmYCQiL4YvIJDwpuzyKF_bwcdOGN5Zcjjd-hMiEsxo-Dg\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"type\":\"answer\"}}],\"text\":\"The pricing agent charges 49 euros a month.\"},\"from\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"prev\":\"tDVnjQQeA-qbusEXwFmyrXyudwXOWBXDa81ynba1kWE\",\"seq\":3,\"session\":\"s-0123456789abcdef\",\"tessera\":\"0.3\",\"time\":\"2026-10-11T12:00:00Z\",\"to\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"type\":\"answer\"}"
+    }
+  ],
+  "keys": {
+    "A": {
+      "agent_id": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+      "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "B": {
+      "agent_id": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+      "seed_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    },
+    "C": {
+      "agent_id": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+      "seed_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+    }
+  },
+  "tessera": "0.3"
+}

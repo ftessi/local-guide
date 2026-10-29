@@ -26,10 +26,10 @@ class _Unregistered(Exception):
 
 class RelayLink:
     def __init__(self, endpoint, identity, relay_url: str, *, name: str, listed: bool = False, description: str = "",
-                 audit=None, poll_wait: float = 25.0, max_backoff: float = 60.0, say=print, pause=None,
+                 public: bool = False, audit=None, poll_wait: float = 25.0, max_backoff: float = 60.0, say=print, pause=None,
                  opener=urlopen):
         self.endpoint, self.identity, self.relay_url = endpoint, identity, relay_url.rstrip("/")
-        self.name, self.listed, self.description = name, listed, description
+        self.name, self.listed, self.description, self.public = name, listed, description, public
         self.audit, self.poll_wait, self.max_backoff, self.say, self.opener = audit, poll_wait, max_backoff, say, opener
         self._stop = threading.Event()
         self.pause = pause or self._stop.wait
@@ -106,7 +106,7 @@ class RelayLink:
         _, raw = self._http("GET", f"{self.relay_url}/relay/challenge")
         nonce = json.loads(raw)["nonce"]
         body = {"agent_id": agent_id, "nonce": nonce, "signature": self.identity.sign(register_message(nonce, agent_id)),
-                "listed": self.listed, "name": self.name, "description": self.description}
+                "listed": self.listed, "public": self.public, "name": self.name, "description": self.description}
         _, raw = self._http("POST", f"{self.relay_url}/relay/register", json.dumps(body).encode())
         data = json.loads(raw)
         self.address = str(data["address"])

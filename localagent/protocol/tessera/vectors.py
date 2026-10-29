@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from localagent.protocol.identity import identity_from_seed, x25519_from_seed, x25519_public
 from localagent.protocol.tessera import seal
 from localagent.protocol.tessera.canonical import canonical
-from localagent.protocol.tessera.envelope import VERSION, encode, envelope_hash, sign_envelope
+from localagent.protocol.tessera.envelope import encode, envelope_hash, sign_envelope
 
 SEED_A = bytes(range(32))
 SEED_B = bytes(range(32, 64))
@@ -26,7 +26,7 @@ def build_vectors() -> dict:
     items, envs = [], {}
 
     def add(name: str, identity, **fields) -> dict:
-        env = sign_envelope(identity, now=TIME, **fields)
+        env = sign_envelope(identity, now=TIME, version="0.2", **fields)
         signed = canonical({k: v for k, v in env.items() if k != "sig"}).decode("utf-8")
         items.append({"name": name, "envelope": env, "signed_bytes": signed, "hash": envelope_hash(env),
                       "canonical": encode(env).decode("utf-8")})
@@ -34,7 +34,7 @@ def build_vectors() -> dict:
         return env
 
     add("card", a, type="card", session="", to="", seq=0, prev="",
-        body={"agent_id": a.agent_id, "name": "Ana's agent", "versions": [VERSION], "kx": x25519_public(kx_a)})
+        body={"agent_id": a.agent_id, "name": "Ana's agent", "versions": ["0.2"], "kx": x25519_public(kx_a)})
     hello = add("hello", b, type="hello", session="", to=a.agent_id, seq=0, prev="",
                 body={"purpose": "Review contract v3", "requested_level": 1,
                       "nonce": "00112233445566778899aabbccddeeff", "e": x25519_public(e_b)})
@@ -56,7 +56,7 @@ def build_vectors() -> dict:
     packages = [("hello", hello_raw), ("welcome", welcome_raw),
                 ("ask", seal.seal_msg(asker_keys, seal.TO_AGENT, 1, HANDLE, encode(ask))),
                 ("answer", seal.seal_msg(agent_keys, seal.TO_ASKER, 1, HANDLE, encode(answer)))]
-    return {"tessera": VERSION,
+    return {"tessera": "0.2",
             "keys": {"A": {"seed_hex": SEED_A.hex(), "agent_id": a.agent_id},
                      "B": {"seed_hex": SEED_B.hex(), "agent_id": b.agent_id}},
             "x25519": {name: {"seed_hex": seed.hex(), "public": x25519_public(x25519_from_seed(seed))}
@@ -66,3 +66,44 @@ def build_vectors() -> dict:
             "canonical": [{"value": v, "canonical": canonical(v).decode("utf-8")} for v in CANONICAL_CASES],
             "envelopes": items,
             "packages": [{"name": n, "package": raw.decode("utf-8")} for n, raw in packages]}
+
+
+SEED_C = bytes(range(64, 96))
+SESSION_C = "s-fedcba9876543210"
+DELEGATED_REPLY_BYTES = 6656
+
+
+def build_vectors_v03() -> dict:
+    """v0.3 additions: a person (B) asks a lead (A) with a mandate; A asks C on B's behalf and reports the call."""
+    from localagent.protocol.tessera.mandate import sign_mandate
+    a, b, c = identity_from_seed(SEED_A), identity_from_seed(SEED_B), identity_from_seed(SEED_C)
+    items = []
+
+    def add(name: str, env: dict) -> dict:
+        signed = canonical({k: v for k, v in env.items() if k != "sig"}).decode("utf-8")
+        items.append({"name": name, "envelope": env, "signed_bytes": signed, "hash": envelope_hash(env),
+                      "canonical": encode(env).decode("utf-8")})
+        return env
+
+    def sign(identity, **fields) -> dict:
+        return sign_envelope(identity, now=TIME, version="0.3", **fields)
+
+    b_a = add("mandate_b_a", sign_mandate(b, to=a.agent_id, before=None, now=TIME))
+    a_c = add("mandate_a_c", sign_mandate(a, to=c.agent_id, before=b_a, now=TIME))
+    ask = add("ask_with_mandate", sign(b, type="ask", session=SESSION, to=a.agent_id, seq=2, prev="",
+                                       body={"text": "What does the pricing agent charge?", "mandates": [b_a],
+                                             "reply_bytes": 0}))
+    delegated = add("delegated_ask", sign(a, type="ask", session=SESSION_C, to=c.agent_id, seq=2, prev="",
+                                          body={"text": "What do you charge?", "mandates": [b_a, a_c],
+                                                "reply_bytes": DELEGATED_REPLY_BYTES}))
+    reply = add("delegated_answer", sign(c, type="answer", session=SESSION_C, to=a.agent_id, seq=3,
+                                         prev=envelope_hash(delegated),
+                                         body={"text": "49 euros a month.", "binding": False, "calls": []}))
+    add("answer_with_calls", sign(a, type="answer", session=SESSION, to=b.agent_id, seq=3, prev=envelope_hash(ask),
+                                  body={"text": "The pricing agent charges 49 euros a month.", "binding": False,
+                                        "calls": [{"agent": c.agent_id, "name": "Carla's pricing agent",
+                                                   "ask": delegated, "reply": reply, "error": ""}]}))
+    return {"tessera": "0.3",
+            "keys": {name: {"seed_hex": seed.hex(), "agent_id": identity_from_seed(seed).agent_id}
+                     for name, seed in (("A", SEED_A), ("B", SEED_B), ("C", SEED_C))},
+            "envelopes": items}

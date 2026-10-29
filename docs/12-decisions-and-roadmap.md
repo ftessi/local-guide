@@ -17,6 +17,8 @@ step-by-step implementation plans these were taken from are in the git history (
 | 2026-10-13 | llama.cpp backend: 3B model 18× faster on the GTX 1050, CPU 4–5× faster; the same adapters work on both backends |
 | 2026-10-19 | Tessera relay: agents reachable without sharing an address, many at once, opt-in directory |
 | 2026-10-23 | Tessera v0.2: end-to-end encryption, records encrypted at rest, metadata-only relay, inspection mode |
+| 2026-10-23 | The relay's browser page: anyone chats with public agents, encrypted in the browser, every chat inspected |
+| 2026-10-29 | Tessera v0.3: agents ask agents for a person (`delegate:`), every link proven and checked; the page becomes a workspace board |
 
 ## Core decisions
 
@@ -63,6 +65,14 @@ step-by-step implementation plans these were taken from are in the git history (
 | 17 | **Records encrypted at rest** with a per-agent key | A copy of the records alone reveals nothing. |
 | 18 | **The relay keeps metadata only** | Nothing worth stealing on the relay; data minimisation. |
 | 19 | **Inspection mode**: owners send finished conversations sealed to the company key; the company keeps findings, not conversations | Security analysis with the owner's consent, without the relay reading anything. |
+| 20 | **The browser does Tessera itself** (JavaScript on vendored audited libraries, a key made in the browser, no sign-in) | The relay still reads nothing; a relay asking on the user's behalf would break that promise. |
+| 21 | **Every browser chat is inspected** for the proof of concept, with the notice shown before the first message | The interactions are what improves the security agent. Turning it off comes later, with accounts. |
+| 22 | **`public:` is its own switch**, separate from `listed:`, in the agent's configuration; a rejected peer stays refused | Owners decide who may answer strangers without accounts; being listed doesn't open an agent to everyone. |
+| 23 | **Visitor data is kept** like any peer's (peer memory, records); chat history stays in the browser | Managing agents and their data is the service the company offers later. |
+| 24 | **Agents ask agents only with proven origin**: a chain of signed mandates from the person, every link checked by every agent asked with its own rules (`delegate:` is the owner's switch; a lead calls only its owner's saved remotes) | Whether two agents work together is already each owner's decision; the chain makes that decision apply to the person and every agent between, so a lead can never become a way around anyone's permissions. |
+| 25 | **Tessera v0.3** adds mandates, a reply budget on `ask` and a signed call report on `answer`; encryption unchanged; cards stay v0.2 envelopes listing both versions | Old agents and cached pages keep working (they simply don't delegate); the browser verifies every reported call against the callee's own signature. |
+| 26 | **One person per conversation**: a lead keeps a separate session per person and callee, and an agent refuses a session that switches person | A callee's model sees the session's earlier questions; mixing people would leak between them. |
+| 27 | **Reply budgets in bytes**: the lead gives each call a share, so its answer with every call stays one message | A cut reply would break its signature; a budget keeps every reported call whole and verifiable. |
 
 ## Decisions of the llama.cpp backend
 
@@ -89,7 +99,7 @@ never letting adapter files leave your machine.
 - Tessera rehearsal on one computer with the real model: correct answer for the shared fact, no private leak
   (including after a restart), identical and tamper-evident records on both sides (page 8).
 
-## Current status (2026-10-23)
+## Current status (2026-10-29)
 
 **Done and on `master`:**
 - The layered core, installables (MCP tools and your own code), the phone app, reminders and the Cloudflare tunnel.
@@ -102,6 +112,9 @@ never letting adapter files leave your machine.
 - The **relay** (`python -m localagent relay`): agents reachable without sharing an address, an opt-in directory.
 - Tessera v0.2: end-to-end encryption, records encrypted at rest (`records`), a metadata-only relay, and inspection
   mode with the company's inspection key (page 8).
+- The relay's **browser page** and **public agents** (`public: true`), with per-visitor limits on the relay (page 8).
+- **Tessera v0.3** and `delegate:`: a lead asks its owner's remotes for the person who asked, every link proven; the
+  page is a **workspace board** (Running, Latest, a starred lead, verified calls) (page 8). On a branch, not merged.
 - Installs on any computer: per-platform PyTorch, then `requirements.txt` (or `requirements-nvidia.txt`).
 - The extensions repository (phone app, calendar, tunnel) is public at
   https://github.com/ftessi/local-guide-extensions; agents install from it with `source:` + `path:`.
@@ -116,11 +129,14 @@ never letting adapter files leave your machine.
 - **Publish** `tessera-protocol`.
 
 **Then:**
-- On top of the relay: a **browser front end** for people without an agent, accounts, rate limits, persistence.
+- In the browser, next: a **public API** so people's own workflows and local agents can load listed agents; then
+  arranging agents freely in the workspace (beyond one lead), live progress of a lead's calls; later accounts,
+  turning inspection off, and per-agent context limits based on each model and its hardware.
 - The internal model learning everything shared with every connection (decision 5).
 - Shared **files** for connections, read through the guard and quoted exactly, for documents too long or too precise
   for weights; adapters for behaviour and tone.
-- **Tessera v0.3:** a persistent socket binding for direct links, rate limiting; protecting keys at rest
+- **Tessera v0.4:** a persistent socket binding for direct links, rate limiting, a bigger message for deeper
+  reported chains; protecting keys at rest
   (passphrase or the operating system's key store); the **security agent** that analyses inspection uploads and
   keeps only findings.
 - **Tessera levels 2–4:** documents with citations, negotiation with owner-signed agreements, narrow delegation.

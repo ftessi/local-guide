@@ -8,7 +8,7 @@ from localagent.__main__ import main
 from localagent.bootstrap import build_services
 from localagent.config import load_config
 from localagent.connect.base import SetupError
-from localagent.protocol.identity import generate_identity, identity_from_seed
+from localagent.protocol.identity import generate_identity, identity_from_seed, load_identity
 from localagent.protocol.tessera.chain import verify_record
 from localagent.relay.core import Relay
 from localagent.relay.http import RelayServer
@@ -126,3 +126,73 @@ def test_relay_and_direct_together(tmp_path, relay_server):
 def test_bad_relay_settings_are_setup_errors(tmp_path, settings):
     with pytest.raises(SetupError, match="connections.tessera"):
         tessera(tmp_path, "connections:\n  tessera:\n    builtin: true\n" + settings)
+
+
+@pytest.mark.parametrize("settings, why", [
+    ("    relay: https://r.example\n    public: yes please\n", "`public` must be true or false"),
+    ("    public: true\n", "`public` needs `relay:`"),
+])
+def test_bad_public_settings_are_setup_errors(tmp_path, settings, why):
+    with pytest.raises(SetupError, match=why):
+        tessera(tmp_path, "connections:\n  tessera:\n    builtin: true\n" + settings)
+
+
+def test_public_relay_uses_separate_public_endpoint(tmp_path, relay_server):
+    *_, conn = tessera(tmp_path, f"connections:\n  tessera:\n    builtin: true\n    port: 0\n"
+                                 f"    relay: http://127.0.0.1:{relay_server.port}\n    public: true\n")
+    try:
+        assert conn.server is not None and conn.endpoint.endpoint.public is False  # the direct one
+        assert conn.link.endpoint is not conn.endpoint
+        assert conn.link.endpoint.endpoint.public is True and conn.link.public is True
+    finally:
+        conn.stop()
+
+
+def test_delegate_option_validated(tmp_path):
+    with pytest.raises(SetupError, match="`delegate` must be true or false"):
+        tessera(tmp_path, "connections:\n  tessera:\n    builtin: true\n    delegate: maybe\n")
+
+
+ASK_CALLEE = '<tool>{"name":"agents","action":"ask","args":{"agent":"callee","question":"What do you charge?"}}</tool>'
+
+
+def test_end_to_end_three_agents(tmp_path, relay_server):
+    from localagent.connect.peer.tessera.client import TesseraClient
+    from localagent.protocol.guard import Protocol
+    from localagent.protocol.tessera.envelope import check_signed, envelope_hash
+    relay_url = f"http://127.0.0.1:{relay_server.port}"
+    public = f"connections:\n  tessera:\n    builtin: true\n    relay: {relay_url}\n    public: true\n"
+    _, callee_id, _, callee = tessera(tmp_path / "c", public, ["49 euros a month.", "never"])
+    lead_dir, lead_id = facing_agent(tmp_path / "l", public + "    delegate: true\n")
+    (lead_dir / "tessera").mkdir(exist_ok=True)
+    (lead_dir / "tessera/remotes.yaml").write_text(
+        f"callee:\n  address: {relay_url}/a/{callee_id}\n  id: {callee_id}\n  purpose: Prices\n", encoding="utf-8")
+    lead_backend = FakeBackend(replies=[ASK_CALLEE, "The callee charges 49 euros a month.", ASK_CALLEE,
+                                        "The callee wouldn't say."])
+    lead = build_services(load_config(lead_dir), backend=lead_backend).connections["tessera"]
+    person = generate_identity(tmp_path / "p" / "identity")
+    person_identity = load_identity(tmp_path / "p" / "identity")
+    callee.start()
+    lead.start()
+    try:
+        assert callee.link.connected.wait(5) and lead.link.connected.wait(5)
+        client = TesseraClient(person_identity, Protocol.for_agent(tmp_path / "p", ["private"], tools={}, owner_secret=""),
+                               remote_id=lead_id, address=f"{relay_url}/a/{lead_id}", purpose="Prices?")
+        reply = client.ask("What does the callee charge?")
+        assert reply.kind == "answer" and reply.text == "The callee charges 49 euros a month."
+        (call,) = reply.calls
+        check_signed(call["ask"])
+        check_signed(call["reply"])
+        assert call["agent"] == callee_id and call["error"] == ""
+        assert call["reply"]["from"] == callee_id and call["reply"]["prev"] == envelope_hash(call["ask"])
+        assert call["reply"]["body"]["text"] == "49 euros a month."
+        assert [m["from"] for m in call["ask"]["body"]["mandates"]] == [person, lead_id]
+        protocol_for(load_config(tmp_path / "c" / "facing")).reject_request(person)
+        reply = client.ask("And now?")
+        assert reply.kind == "answer" and reply.text == "The callee wouldn't say."
+        (call,) = reply.calls
+        assert call["error"] == "not_allowed" and call["reply"] is None
+        client.close()
+    finally:
+        lead.stop()
+        callee.stop()

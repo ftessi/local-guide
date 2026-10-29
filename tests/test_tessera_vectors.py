@@ -37,3 +37,30 @@ def test_vectors_are_self_consistent():
     assert asker_keys.send.hex() == v["session_keys"]["asker_to_agent"] and handle == v["handle"]
     assert seal.open_msg(seal.Keys(send=asker_keys.recv, recv=asker_keys.send), seal.TO_AGENT,
                          seal.parse(p["ask"])).decode("utf-8") == next(i for i in v["envelopes"] if i["name"] == "ask")["canonical"]
+
+
+FILE_V03 = Path(__file__).parent / "data" / "tessera_vectors_v0.3.json"
+
+
+def test_v03_vectors_file_matches_builder():
+    from localagent.protocol.tessera.vectors import build_vectors_v03
+    assert json.loads(FILE_V03.read_text(encoding="utf-8")) == build_vectors_v03()
+
+
+def test_v03_vectors_check():
+    from localagent.protocol.tessera.envelope import check_signed
+    from localagent.protocol.tessera.mandate import check_chain
+    from localagent.protocol.tessera.vectors import TIME
+    v = json.loads(FILE_V03.read_text(encoding="utf-8"))
+    ids = {name: key["agent_id"] for name, key in v["keys"].items()}
+    env = {item["name"]: item["envelope"] for item in v["envelopes"]}
+    for item in v["envelopes"]:
+        check_signed(item["envelope"])
+        assert envelope_hash(item["envelope"]) == item["hash"]
+        assert canonical({k: x for k, x in item["envelope"].items() if k != "sig"}).decode("utf-8") == item["signed_bytes"]
+    assert check_chain(env["ask_with_mandate"]["body"]["mandates"], caller=ids["B"], me=ids["A"], now=TIME) == [ids["B"]]
+    assert check_chain(env["delegated_ask"]["body"]["mandates"], caller=ids["A"], me=ids["C"],
+                       now=TIME) == [ids["B"], ids["A"]]
+    call = env["answer_with_calls"]["body"]["calls"][0]
+    assert call["ask"] == env["delegated_ask"] and call["reply"] == env["delegated_answer"]
+    assert call["reply"]["prev"] == envelope_hash(call["ask"])
